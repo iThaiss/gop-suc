@@ -6,7 +6,7 @@ import { MapPin, Package } from "lucide-react";
 import { Give, GiveActions, GiveNeedButton, Share } from "../../../components/client";
 import { VolunteerShifts } from "../../../components/volunteer";
 import { campaign, expenses, needs, publicGifts, updates, volunteerShifts } from "../../../lib/db";
-import { money, picture, updateDate, updatePicture } from "../../../lib/domain";
+import { expensePhotoPath, money, picture, updateDate, updatePicture } from "../../../lib/domain";
 
 export const dynamic = "force-dynamic";
 type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string;soLuong?:string;gop?:string;soTien?:string;ca?:string}>};
@@ -67,7 +67,12 @@ export default async function CampaignPage({params,searchParams}:Props) {
       </div>
       <aside>
         <section className="panel" id="thu-chi"><h2>Thu chi công khai</h2><dl className="ledger"><div><dt>Đã nhận</dt><dd>{money(c.received)}</dd></div><div><dt>Đã chi</dt><dd>{money(c.spent)}</dd></div><div><dt>Còn lại</dt><dd>{money(c.received-c.spent)}</dd></div></dl>
-          {bills.map(b=><details key={b.id}><summary>{b.title} · {money(b.amount)}</summary><p>{b.evidence}</p></details>)}{!bills.length && <p>Chưa có khoản chi công bố.</p>}
+          {bills.map(b=><details className="expense-detail" key={b.id}><summary>{b.title} · {money(b.amount)}</summary>
+            <time dateTime={b.created.replace(" ","T")+"Z"}>{updateDate(b.created)}</time><p>{b.evidence}</p>
+            {b.photo_sha&&<div className="expense-proof"><a href={expensePhotoPath(c.slug,b.id)} target="_blank" rel="noreferrer" aria-label={`Mở ảnh chứng từ: ${b.title}`}>
+              <Image src={expensePhotoPath(c.slug,b.id)} unoptimized width={1280} height={1280} alt={`Ảnh chứng từ: ${b.title}`}/><span>Mở ảnh chứng từ</span>
+            </a><small>Mã nhận diện tệp ảnh (SHA-256)</small><code>{b.photo_sha}</code></div>}
+          </details>)}{!bills.length && <p>Chưa có khoản chi công bố.</p>}
         </section>
         <section className="panel"><h2>Ủng hộ gần đây</h2>{gifts.map((g,i)=><article className="contributor" key={i}><div><b>{g.name}</b><strong>{money(g.amount)}</strong></div>{g.note&&<p>{g.note}</p>}</article>)}</section>
       </aside>

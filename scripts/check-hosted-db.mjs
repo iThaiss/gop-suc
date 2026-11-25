@@ -13,7 +13,7 @@ if (!url) {
 }
 if (!url) throw new Error("Missing DATABASE_URL");
 process.env.DATABASE_URL=url;
-const {all,bookVolunteer,campaign,campaignImpact,campaigns,cancelVolunteer,confirmCash,contribute,manage,needs,publicUpdatePhoto,transaction,updates,volunteerShifts}=await import("../lib/db.ts");
+const {all,bookVolunteer,campaign,campaignImpact,campaigns,cancelVolunteer,confirmCash,contribute,expenses,manage,needs,publicExpensePhoto,publicUpdatePhoto,transaction,updates,volunteerShifts}=await import("../lib/db.ts");
 const {assistMatches,parseAssist}=await import("../lib/assist.ts");
 const [rows,items,posts,shifts]=await Promise.all([
   campaigns(),needs(),updates("lop-hoc-sau-mua"),volunteerShifts("lop-hoc-sau-mua"),
@@ -29,9 +29,10 @@ try {
   await session.query("BEGIN");
   const found=await session.query("insert into gopsuc.limits (key,count,until) values ($1,1,0) returning count",["deployment-check"]);
   assert.equal(found.rows[0].count,1);
-  const roles=await session.query("select has_schema_privilege('anon','gopsuc','USAGE') as anon, has_column_privilege('anon','gopsuc.receipts','action_hash','SELECT') as anon_hash, current_user as role");
+  const roles=await session.query("select has_schema_privilege('anon','gopsuc','USAGE') as anon, has_column_privilege('anon','gopsuc.receipts','action_hash','SELECT') as anon_hash, has_table_privilege('anon','gopsuc.expense_photos','SELECT') as anon_photo, current_user as role");
   assert.equal(roles.rows[0].anon,false);
   assert.equal(roles.rows[0].anon_hash,false);
+  assert.equal(roles.rows[0].anon_photo,false);
   assert.equal(roles.rows[0].role,"gopsuc_runtime");
   console.log("PostgreSQL: read models, runtime writes, and private schema verified.");
 } finally {
@@ -78,7 +79,14 @@ await assert.rejects(transaction(async()=>{
   assert.equal((await cancelVolunteer(booking.code,bookingToken)).status,"cancelled");
   await all("INSERT INTO sessions VALUES(?,?,?)","deployment-check","admin",0);
   await all("DELETE FROM sessions WHERE token=?","deployment-check");
-  await manage("admin",slug,"expense",{title:"Test",amount:25000,evidence:"Demo"});
+  await manage("admin",slug,"expense",{title:"Test",amount:25000,evidence:"Demo",publishPhoto:1},bytes);
+  assert.equal((await campaign(slug)).spent,25000);
+  const [charge]=await expenses(slug);
+  assert.match(charge.photo_sha,/^[a-f0-9]{64}$/);
+  assert.deepEqual((await publicExpensePhoto(slug,charge.id)).image,bytes);
+  await manage("admin",slug,"hideExpensePhoto",{expenseId:charge.id});
+  assert.equal(await publicExpensePhoto(slug,charge.id),undefined);
+  assert.equal((await expenses(slug))[0].photo_hidden,1);
   assert.equal((await campaign(slug)).spent,25000);
   throw rollback;
 }),error=>error===rollback);

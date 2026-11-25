@@ -42,6 +42,10 @@ function sqlite() {
     CREATE TABLE IF NOT EXISTS expenses(
       id INTEGER PRIMARY KEY, slug TEXT NOT NULL REFERENCES campaigns(slug), title TEXT NOT NULL,
       amount INTEGER NOT NULL CHECK(amount>0), evidence TEXT NOT NULL, created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS expense_photos(
+      expense_id INTEGER PRIMARY KEY REFERENCES expenses(id) ON DELETE CASCADE,
+      image BLOB NOT NULL, sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+      is_public INTEGER NOT NULL DEFAULT 1 CHECK(is_public IN (0,1)));
     CREATE TABLE IF NOT EXISTS updates(
       id INTEGER PRIMARY KEY, slug TEXT NOT NULL REFERENCES campaigns(slug), title TEXT NOT NULL,
       body TEXT NOT NULL, image TEXT NOT NULL DEFAULT '', created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -113,7 +117,7 @@ function postgres(peer: Pick<pg.PoolClient,"query">):Executor {
     let bind=0;
     const statement=sql.replace(/\?/g,()=>"$"+ ++bind)
       .replace(/c\.rowid/g,"c.position").replace(/\b(r\.)?rowid\b/g,"$1sequence")
-      .replace(/\b(FROM|JOIN|INTO|UPDATE) (campaigns|needs|receipts|expenses|updates|update_photos|volunteer_shifts|volunteer_bookings|sessions|limits)\b/gi,"$1 gopsuc.$2");
+      .replace(/\b(FROM|JOIN|INTO|UPDATE) (campaigns|needs|receipts|expenses|expense_photos|updates|update_photos|volunteer_shifts|volunteer_bookings|sessions|limits)\b/gi,"$1 gopsuc.$2");
     const {rows}=await peer.query(statement,values.map(v=>v instanceof Uint8Array ? Buffer.from(v) : v));
     return rows.map(row=>{
       const columns: Record<string,string>={needid:"needId",needname:"needName",hasphoto:"hasPhoto",startsat:"startsAt"};
@@ -173,7 +177,15 @@ export const publicUpdatePhoto = async (slug: string, id: number) => (await get<
   SELECT p.image FROM update_photos p JOIN updates u ON u.id=p.updateId JOIN campaigns c ON c.slug=u.slug
   WHERE u.slug=? AND u.id=? AND c.status!='draft'
 `,slug,id))?.image;
-export const expenses = (slug: string) => all<Expense>("SELECT id,title,amount,evidence,created FROM expenses WHERE slug=? ORDER BY id DESC",slug)
+export const expenses = (slug: string) => all<Expense>(`
+  SELECT e.id,e.title,e.amount,e.evidence,e.created,CASE WHEN p.is_public=1 THEN p.sha256 ELSE NULL END AS photo_sha,
+    CASE WHEN p.is_public=0 THEN 1 ELSE 0 END AS photo_hidden
+  FROM expenses e LEFT JOIN expense_photos p ON p.expense_id=e.id WHERE e.slug=? ORDER BY e.id DESC
+`,slug);
+export const publicExpensePhoto = (slug:string,id:number) => get<{image:Uint8Array;sha256:string}>(`
+  SELECT p.image,p.sha256 FROM expense_photos p JOIN expenses e ON e.id=p.expense_id JOIN campaigns c ON c.slug=e.slug
+  WHERE e.slug=? AND e.id=? AND p.is_public=1 AND c.status!='draft'
+`,slug,id);
 export const publicGifts = (slug: string) => all<{name:string;amount:number;note:string|null}>("SELECT COALESCE(name,'****') AS name,amount,note FROM receipts WHERE slug=? AND kind='cash' AND status='confirmed' ORDER BY rowid DESC LIMIT 8",slug)
 export const receipt = (code: string) => get<Receipt>(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.code=?`,code)
 export const GOODS_PAGE_SIZE = 15;
@@ -309,7 +321,13 @@ export function manage(role: Role, slug: string, action: string, input: Record<s
     } else if (action === "expense") {
       if (role !== "admin") throw new RuleError("Cần quyền quản trị để ghi khoản chi đã duyệt.");
       if (Number(input.amount) > c.received - c.spent) throw new RuleError("Khoản chi vượt quá số dư.");
-      await all("INSERT INTO expenses(slug,title,amount,evidence) VALUES(?,?,?,?)",slug,input.title,input.amount,input.evidence);
+      if (photo && input.publishPhoto!==1) throw new RuleError("Xác nhận ảnh đã che thông tin riêng tư trước khi công khai.");
+      const expense=(await get<{id:number}>("INSERT INTO expenses(slug,title,amount,evidence) VALUES(?,?,?,?) RETURNING id",slug,input.title,input.amount,input.evidence))!;
+      if (photo) await all("INSERT INTO expense_photos(expense_id,image,sha256) VALUES(?,?,?)",expense.id,photo,createHash("sha256").update(photo).digest("hex"));
+    } else if (action === "hideExpensePhoto") {
+      if (role!=="admin") throw new RuleError("Cần quyền quản trị để ẩn ảnh chứng từ.");
+      const updated=await get("UPDATE expense_photos SET is_public=0 WHERE expense_id=(SELECT id FROM expenses WHERE id=? AND slug=?) AND is_public=1 RETURNING expense_id",input.expenseId,slug);
+      if (!updated) throw new RuleError("Ảnh đã ẩn hoặc không thuộc chiến dịch này.");
     } else if (action === "receive" || action === "cancel") {
       const gift = await receipt(String(input.code));
       if (!gift || gift.slug !== slug || gift.kind !== "goods" || gift.status !== "pending") throw new RuleError("Phiếu đã xử lý hoặc không hợp lệ.");

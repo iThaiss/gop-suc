@@ -14,7 +14,8 @@ export type Update = { id: number; slug: string; title: string; body: string; im
 export type CampaignImpact = Pick<Campaign, "slug" | "title" | "status" | "received" | "spent" | "goal"> & {
   updates: Pick<Update, "id" | "title" | "created">[];
 };
-export type Expense = { id: number; title: string; amount: number; evidence: string; created: string };
+export type Expense = { id: number; title: string; amount: number; evidence: string; created: string; photo_sha: string | null; photo_hidden: number };
+export const expensePhotoPath = (slug:string,id:number) => `/api/gopsuc/expense-photos/${slug}/${id}`;
 export type Receipt = {
   code: string; slug: string; kind: "cash" | "goods"; amount: number;
   status: "pending" | "confirmed" | "cancelled"; actual: number | null;

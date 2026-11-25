@@ -6,7 +6,7 @@ import { CoordinationBoard } from "../../components/coordination-board";
 import { JournalDraftFields } from "../../components/journal-draft";
 import { Share } from "../../components/client";
 import { campaigns, expenses, GOODS_PAGE_SIZE, needs, pendingCounts, pendingGoods, updates, volunteerShifts } from "../../lib/db";
-import { categories, covers, money, vietnamTime, type Campaign } from "../../lib/domain";
+import { categories, covers, expensePhotoPath, money, vietnamTime, type Campaign } from "../../lib/domain";
 import { topics } from "../../lib/match";
 import { sessionCookie, sessionRole } from "../../lib/session";
 import { canManageCampaign, coordinationTasks, journalDraft } from "../../lib/coordination";
@@ -143,10 +143,20 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
               <small>JPEG, PNG hoặc WebP, tối đa 4 MB. Nếu tải ảnh lên, ảnh này sẽ thay ảnh minh họa khi bài xuất hiện công khai.</small>
             </ActionForm>
           </details>
-          <h3>Khoản chi đã công bố</h3>{bills.length ? <ul className="admin-need-list">{bills.map(bill=><li key={bill.id}><b>{bill.title}</b><span>{money(bill.amount)}</span></li>)}</ul> : <p>Chưa có khoản chi.</p>}
+          <h3>Khoản chi đã công bố</h3>{bills.length ? <ul className="admin-need-list">{bills.map(bill=><li key={bill.id}>
+            <div><b>{bill.title}</b>{bill.photo_hidden===1&&<small> · Đã ẩn ảnh chứng từ</small>}</div><span>{money(bill.amount)}</span>
+            {bill.photo_sha&&<div className="admin-expense-photo"><a href={expensePhotoPath(selected.slug,bill.id)} target="_blank" rel="noreferrer">Xem ảnh công khai</a>
+              {role==="admin"&&<details className="admin-disclosure"><summary>Ẩn ảnh</summary><p>Ảnh sẽ ngừng hiển thị trên web. Khoản chi và mô tả vẫn giữ nguyên. Thao tác này không thu hồi bản người xem đã tải trước đó.</p>
+                <ActionForm action="hideExpensePhoto" slug={selected.slug} label="Ẩn ảnh công khai" numeric={["expenseId"]} tone="secondary"><input type="hidden" name="expenseId" value={bill.id}/></ActionForm>
+              </details>}
+            </div>}
+          </li>)}</ul> : <p>Chưa có khoản chi.</p>}
           {role==="admin"&&<details className="admin-disclosure"><summary><Plus size={18}/> Ghi khoản chi đã duyệt</summary>
             <ActionForm action="expense" slug={selected.slug} label="Công bố khoản chi" numeric={["amount"]}>
               <label>Hạng mục<input name="title" maxLength={100} required/></label><label>Số tiền (₫)<input name="amount" type="number" min="1" max="1000000000" required/></label><label>Mô tả chứng từ công khai<textarea name="evidence" maxLength={400} required/></label>
+              <label>Ảnh chứng từ công khai (tùy chọn)<input type="file" name="photo" accept="image/jpeg,image/png,image/webp"/></label>
+              <small>JPEG, PNG hoặc WebP, tối đa 4 MB. Chỉ tải chứng từ mô phỏng đã che thông tin cá nhân, số tài khoản và chữ ký.</small>
+              <label className="check"><input type="checkbox" name="publishPhoto" value="yes"/> Tôi đã kiểm tra ảnh và đồng ý công khai.</label>
             </ActionForm>
           </details>}
         </>}

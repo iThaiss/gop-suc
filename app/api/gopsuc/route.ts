@@ -20,6 +20,8 @@ const amount = z.number().int().min(1).max(1_000_000_000);
 const manageCommon = {slug};
 const campaignFields = {title:string(100),description:string(900),category:z.enum(categories),location:string(60),cover:z.enum(covers),goal:amount};
 const updateSchema = z.object({action:z.literal("update"),slug,title:string(100),body:string(900),image:z.enum(["",...covers])});
+const expenseSchema = z.object({action:z.literal("expense"),slug,title:string(100),amount,evidence:string(400)});
+const expensePhotoSchema = expenseSchema.extend({amount:z.string().regex(/^[1-9]\d{0,9}$/).transform(Number).pipe(amount),publishPhoto:z.literal("yes")});
 const assistInput=z.discriminatedUnion("source",[
   z.object({source:z.literal("query"),query:string(220)}),
   z.object({source:z.literal("filters"),filters:z.object({
@@ -44,7 +46,8 @@ const schema = z.discriminatedUnion("action",[
   z.object({action:z.literal("addShift"),slug,title:string(100),location:string(120),startLocal:z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),capacity:z.number().int().min(1).max(1000)}),
   z.object({action:z.literal("need"),...manageCommon,name:string(100),unit:string(30),target:z.number().int().min(1).max(100_000),handoff:string(180),topic:z.enum(topics.map(t=>t.id).filter(id=>id!=="money"))}),
   updateSchema,
-  z.object({action:z.literal("expense"),...manageCommon,title:string(100),amount,evidence:string(400)}),
+  expenseSchema,
+  z.object({action:z.literal("hideExpensePhoto"),slug,expenseId:z.number().int().positive().max(2_147_483_647)}),
   z.object({action:z.literal("receive"),...manageCommon,code,actual:z.number().int().min(1).max(100_000)}),
   z.object({action:z.literal("cancel"),...manageCommon,code}),
 ]);
@@ -73,13 +76,22 @@ export async function POST(request: NextRequest) {
     if (!await rateLimit(request,"update-photo")) return json({error:"Bạn thao tác quá nhanh. Thử lại sau một phút."},429);
     try {
       const form = await readPhotoForm(request);
-      const post = updateSchema.safeParse(Object.fromEntries(form));
       const photos = form.getAll("photo");
-      if (!post.success || photos.length!==1 || !(photos[0] instanceof File)) return json({error:"Kiểm tra lại nội dung và ảnh cập nhật."},400);
-      const {slug: postSlug, action, ...fields} = post.data;
-      const target = await campaign(postSlug);
-      if (!target || (role!=="admin" && target.owner!==role)) return json({error:"Bạn không có quyền với chiến dịch này."},403);
-      await manage(role,postSlug,action,fields,await encodeUpdateImage(photos[0]));
+      if (photos.length!==1 || !(photos[0] instanceof File)) return json({error:"Chọn đúng một ảnh để tải lên."},400);
+      if (form.get("action")==="expense") {
+        if (role!=="admin") return json({error:"Chỉ quản trị viên có thể công khai chứng từ chi."},403);
+        const parsed=expensePhotoSchema.safeParse(Object.fromEntries(form));
+        if (!parsed.success) return json({error:form.get("publishPhoto")!=="yes"?"Xác nhận ảnh đã che thông tin riêng tư trước khi công khai.":"Kiểm tra lại nội dung khoản chi và ảnh chứng từ."},400);
+        const {slug: target,action,title,amount,evidence}=parsed.data;
+        await manage(role,target,action,{title,amount,evidence,publishPhoto:1},await encodeUpdateImage(photos[0]));
+      } else {
+        const post=updateSchema.safeParse(Object.fromEntries(form));
+        if (!post.success) return json({error:"Kiểm tra lại nội dung và ảnh cập nhật."},400);
+        const {slug: postSlug, action, ...fields}=post.data;
+        const target=await campaign(postSlug);
+        if (!target || (role!=="admin" && target.owner!==role)) return json({error:"Bạn không có quyền với chiến dịch này."},403);
+        await manage(role,postSlug,action,fields,await encodeUpdateImage(photos[0]));
+      }
       return json({ok:true},201);
     } catch (error) {
       if (error instanceof UploadError) return json({error:error.message},error.status);

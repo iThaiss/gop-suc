@@ -16,8 +16,9 @@ export function ActionForm({ action, slug, children, label, numeric=[], tone="pr
     const fields=Object.fromEntries([...data].filter(([,value])=>typeof value==="string").map(([name,value])=>[name,numeric.includes(name)?Number(value):String(value)]));
     try {
       const photo=data.get("photo");
-      if (action==="update" && photo instanceof File && photo.size) {
+      if ((action==="update"||action==="expense") && photo instanceof File && photo.size) {
         if (photo.size>UPDATE_IMAGE_MAX_BYTES) throw new Error("Ảnh vượt quá 4 MB.");
+        if (action==="expense"&&data.get("publishPhoto")!=="yes") throw new Error("Xác nhận ảnh đã che thông tin riêng tư trước khi công khai.");
         data.set("action",action);
         data.set("slug",slug??"");
         await api(data);

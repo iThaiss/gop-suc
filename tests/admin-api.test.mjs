@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rmdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -8,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
+import sharp from "sharp";
 
 const require = createRequire(import.meta.url);
 
@@ -160,6 +162,39 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const repeatConfirm=await (await post({action:"confirm",code:cash.code,actionToken:cashToken})).json();
   assert.equal(repeatConfirm.duplicate,true);
   assert.equal(repeatConfirm.receipt.status,"confirmed");
+
+  const picture=await sharp({create:{width:400,height:600,channels:3,background:"white"}}).withMetadata().jpeg().toBuffer();
+  const submitProof=(cookie,consent,proof=picture,amount="6000")=>{
+    const form=new FormData();
+    for(const [key,value] of Object.entries({action:"expense",slug,title:"Chứng từ chi thử",amount,evidence:"Chỉ là chứng từ mô phỏng."})) form.set(key,value);
+    if(consent) form.set("publishPhoto","yes");
+    form.set("photo",new Blob([proof],{type:"image/jpeg"}),"demo.jpg");
+    return fetch(`${origin}/api/gopsuc`,{method:"POST",headers:{origin,cookie},body:form});
+  };
+  assert.equal((await submitProof(organizer,true)).status,403);
+  assert.equal((await submitProof(admin,false)).status,400);
+  assert.equal((await submitProof(admin,true,Buffer.from("not an image"))).status,400);
+  assert.equal((await submitProof(admin,true,picture,"30000")).status,409);
+  assert.doesNotMatch(await (await fetch(path)).text(),/Chứng từ chi thử/);
+  assert.equal((await submitProof(admin,true)).status,201);
+  const ledger=await (await fetch(path)).text();
+  const imagePath=ledger.match(new RegExp(`/api/gopsuc/expense-photos/${slug}/(\\d+)`));
+  assert.ok(imagePath);
+  const proof=await fetch(origin+imagePath[0]);
+  assert.equal(proof.status,200);
+  assert.equal(proof.headers.get("content-type"),"image/webp");
+  assert.equal(proof.headers.get("cache-control"),"no-store");
+  const published=Buffer.from(await proof.arrayBuffer());
+  assert.ok(ledger.includes(createHash("sha256").update(published).digest("hex")));
+  assert.equal((await sharp(published).metadata()).exif,undefined);
+  assert.equal((await fetch(`${origin}/api/gopsuc/expense-photos/lop-hoc-sau-mua/${imagePath[1]}`)).status,404);
+  const hide={action:"hideExpensePhoto",slug,expenseId:Number(imagePath[1])};
+  assert.equal((await post(hide,organizer)).status,409);
+  assert.equal((await post(hide,admin)).status,200);
+  assert.equal((await fetch(origin+imagePath[0])).status,404);
+  const retained=await (await fetch(path)).text();
+  assert.match(retained,/Chứng từ chi thử/);
+  assert.ok(!retained.includes(imagePath[0]));
 
   const shiftId = 1; // The first shift belongs to the seeded campaign in a fresh test database.
   const first = await post({action:"bookVolunteer",slug:"lop-hoc-sau-mua",shiftId});
