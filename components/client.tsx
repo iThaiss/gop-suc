@@ -8,6 +8,7 @@ import { money, vietnamTime, type Campaign, type CampaignImpact, type Need, type
 import { receiptAccessFromFragment, receiptPath } from "../lib/receipt-access";
 import { ReceiptImpact } from "./receipt-impact";
 import { PrivateReceiptLink } from "./private-receipt-link";
+import { CalendarLink } from "./calendar-link";
 
 export async function api<T>(data: object | FormData, signal?: AbortSignal): Promise<T> {
   const result = await fetch("/api/gopsuc",{
@@ -252,6 +253,7 @@ export function Lookup({initialCode}: {initialCode:string}) {
   return <><form className="form" onSubmit={event=>{event.preventDefault();void process();}}><label>Mã tra cứu<input value={code} onChange={e=>setCode(e.target.value)} required autoComplete="off" spellCheck={false}/></label><button disabled={busy} className="button">{busy?"Đang xử lý…":"Tra cứu"}</button></form>
     {gift && <><ReceiptView gift={gift}/>{gift.kind==="cash" && gift.status==="pending" && (access?.code===gift.code ? <button className="button" disabled={busy} onClick={()=>void process(true)}>Xác nhận giao dịch demo</button> : <p>Phiếu chỉ xem. Hãy quét QR riêng hoặc mở liên kết thao tác đã lưu để xác nhận.</p>)}</>}
     {booking && <><div className="ticket"><strong>{booking.title}</strong><span>{vietnamTime(booking.startsAt)} · {booking.location}</span><span>{booking.status==="booked"?"Đã giữ 1 chỗ":"Đã hủy giữ chỗ"}</span></div>
+      {booking.status==="booked"&&Date.parse(booking.startsAt)>Date.now()&&<CalendarLink slug={booking.slug} shiftId={booking.shiftId}/>}
       <a href={`/chien-dich/${booking.slug}#tinh-nguyen`}>Xem ca trên trang chiến dịch</a>
       {booking.status==="booked" && Date.parse(booking.startsAt)>Date.now() && (access?.code===booking.code ? <details className="cancel-booking"><summary>Hủy giữ chỗ</summary><p>Chỗ này sẽ được mở lại cho người khác.</p><button type="button" className="button outline" disabled={busy} onClick={async()=>{
         setBusy(true);setError("");setStatus("");

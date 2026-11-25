@@ -13,7 +13,7 @@ if (!url) {
 }
 if (!url) throw new Error("Missing DATABASE_URL");
 process.env.DATABASE_URL=url;
-const {all,bookVolunteer,campaign,campaignImpact,campaigns,cancelVolunteer,confirmCash,contribute,expenses,manage,needs,publicExpensePhoto,publicUpdatePhoto,transaction,updates,volunteerShifts}=await import("../lib/db.ts");
+const {all,bookVolunteer,campaign,campaignImpact,campaigns,cancelVolunteer,confirmCash,contribute,expenses,manage,needs,publicExpensePhoto,publicUpdatePhoto,publicVolunteerCalendar,transaction,updates,volunteerShifts}=await import("../lib/db.ts");
 const {assistMatches,parseAssist}=await import("../lib/assist.ts");
 const [rows,items,posts,shifts]=await Promise.all([
   campaigns(),needs(),updates("lop-hoc-sau-mua"),volunteerShifts("lop-hoc-sau-mua"),
@@ -65,6 +65,9 @@ await assert.rejects(transaction(async()=>{
   const local=new Date(Date.now()+48*3600_000).toISOString().slice(0,16);
   await manage("organizer",slug,"addShift",{title:"Test shift",location:"Demo",startLocal:local,capacity:1});
   const [shift]=await volunteerShifts(slug);
+  const event=await publicVolunteerCalendar(slug,shift.id);
+  assert.equal(event.startsAt,shift.startsAt);
+  assert.equal(await publicVolunteerCalendar("bep-am-cuoi-tuan",shift.id),undefined);
   const intent=parseAssist("Mình có 15 bộ dụng cụ học tập ở Huế, muốn tình nguyện hoặc góp 20k",["Huế"]);
   const live=assistMatches(intent.filters,[(await campaign(slug))],await needs(slug),[shift]);
   assert.equal(live.goods[0].suggested,1);
@@ -74,6 +77,7 @@ await assert.rejects(transaction(async()=>{
   assert.equal(impact.received,25000);
   assert.deepEqual(impact.updates.map(update=>update.title),["Test photo"]);
   const {booking,actionToken:bookingToken}=await bookVolunteer(slug,shift.id);
+  assert.equal(booking.shiftId,shift.id);
   await assert.rejects(bookVolunteer(slug,shift.id),/đủ người/);
   await assert.rejects(cancelVolunteer(booking.code,cashToken),/liên kết thao tác riêng/);
   assert.equal((await cancelVolunteer(booking.code,bookingToken)).status,"cancelled");

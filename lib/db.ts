@@ -196,9 +196,13 @@ export const volunteerShifts = (slug: string) => all<VolunteerShift>(`
   FROM volunteer_shifts s WHERE s.slug=? ORDER BY s.startsAt,s.id
 `,slug)
 export const volunteerBooking = (code: string) => get<VolunteerBooking>(`
-  SELECT b.code,s.slug,s.title,s.location,s.startsAt,b.status
+  SELECT b.code,s.slug,s.id AS "shiftId",s.title,s.location,s.startsAt,b.status
   FROM volunteer_bookings b JOIN volunteer_shifts s ON s.id=b.shiftId WHERE b.code=?
 `,code)
+export const publicVolunteerCalendar = (slug:string,id:number) => get<Pick<VolunteerShift,"id"|"slug"|"title"|"location"|"startsAt">>(`
+  SELECT s.id,s.slug,s.title,s.location,s.startsAt FROM volunteer_shifts s JOIN campaigns c ON c.slug=s.slug
+  WHERE s.slug=? AND s.id=? AND c.status!='draft'
+`,slug,id);
 export class RuleError extends Error {}
 export class ReceiptAccessError extends Error {
   constructor(){super("Bạn cần mở liên kết thao tác riêng của phiếu này.");}

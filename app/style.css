@@ -180,6 +180,8 @@ textarea{min-height:76px;resize:vertical}
 .private-receipt-link{display:grid;gap:8px;text-align:left}
 .private-receipt-link>small{display:flex;gap:6px;align-items:center;color:var(--muted)}
 .private-receipt-link>small svg{flex:none}
+.calendar-link{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.calendar-link small{color:var(--muted);flex:1;min-width:min(100%,14rem)}
 .error{color:#a12626}
 .admin-form{margin-top:12px}
 .foot{min-height:92px;padding-block:18px;flex-wrap:wrap}

@@ -22,7 +22,8 @@ export type Receipt = {
   needId: number | null; needName: string | null; unit: string | null; handoff: string | null;
 };
 export type VolunteerShift = {id:number;slug:string;title:string;location:string;startsAt:string;capacity:number;reserved:number};
-export type VolunteerBooking = {code:string;slug:string;title:string;location:string;startsAt:string;status:"booked"|"cancelled"};
+export type VolunteerBooking = {code:string;slug:string;shiftId:number;title:string;location:string;startsAt:string;status:"booked"|"cancelled"};
+export const shiftCalendarPath = (slug:string,shiftId:number) => `/api/gopsuc/volunteer-calendar/${slug}/${shiftId}`;
 export function vietnamTime(iso: string) {
   return new Intl.DateTimeFormat("vi-VN",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Ho_Chi_Minh"}).format(new Date(iso));
 }

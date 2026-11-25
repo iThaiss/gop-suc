@@ -86,6 +86,10 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.equal((await post(draft, organizer)).status, 200);
   const adminOnly={...draft,slug:"noi-bo-cua-quan-tri",title:"Bản nháp chỉ quản trị viên xem"};
   assert.equal((await post(adminOnly,admin)).status,200);
+  const calendarBase=`${origin}/api/gopsuc/volunteer-calendar`;
+  const privateStart=new Date(Date.now()+31*3_600_000).toISOString().slice(0,16);
+  assert.equal((await post({action:"addShift",slug:adminOnly.slug,title:"Ca chưa công bố",location:"Điểm nội bộ",startLocal:privateStart,capacity:5},admin)).status,200);
+  assert.equal((await fetch(`${calendarBase}/${adminOnly.slug}/2`)).status,404);
   const panel=async (url,cookie)=>await (await fetch(`${origin}/quan-tri${url}`,{headers:cookie?{cookie}:{}})).text();
   assert.doesNotMatch(await panel("",null),/id="ban-dieu-phoi"/);
   const orgBoard=await panel("",organizer);
@@ -200,6 +204,16 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const first = await post({action:"bookVolunteer",slug:"lop-hoc-sau-mua",shiftId});
   assert.equal(first.status,201);
   const {booking:volunteer,actionToken:volunteerToken}=await first.json();
+  assert.equal(volunteer.shiftId,shiftId);
+  const calendar=await fetch(`${calendarBase}/${volunteer.slug}/${volunteer.shiftId}`);
+  assert.equal(calendar.status,200);
+  assert.match(calendar.headers.get("content-type"),/text\/calendar/);
+  assert.match(calendar.headers.get("content-disposition"),/gop-suc-ca-1\.ics/);
+  assert.equal(calendar.headers.get("cache-control"),"no-store");
+  const calendarText=await calendar.text();
+  assert.match(calendarText,/DTSTART:\d{8}T\d{6}Z/);
+  assert.ok(!calendarText.includes(volunteer.code)&&!calendarText.includes(volunteerToken));
+  assert.equal((await fetch(`${calendarBase}/bep-am-cuoi-tuan/${volunteer.shiftId}`)).status,404);
   assert.equal((await post({action:"cancelVolunteer",code:volunteer.code})).status,403);
   assert.equal((await post({action:"cancelVolunteer",code:volunteer.code,actionToken:cashToken})).status,403);
   const volunteerLookup=await (await post({action:"lookup",code:volunteer.code,withImpact:true})).json();
