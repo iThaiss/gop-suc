@@ -29,14 +29,49 @@ export function classify(text: string) {
   })).filter(result => result.score >= 0.19).sort((a,b) => b.score - a.score).slice(0,2);
 }
 
-export function findMatches(query: string, rows: Need[]) {
+const unitGroups = {
+  set: ["bo"],
+  weight: ["kg", "ky", "can", "kilogam", "kilogram"],
+  piece: ["chiec", "cai"],
+} as const;
+
+function unitGroup(unit: string) {
+  const token = normalize(unit.trim());
+  return Object.entries(unitGroups).find(([, group]) => (group as readonly string[]).includes(token))?.[0];
+}
+
+function quantityIntent(query: string) {
+  const plain = normalize(query);
+  const units = Object.values(unitGroups).flat().join("|");
+  const quantities = [...plain.matchAll(new RegExp(`(?<![\\d.,])([1-9]\\d{0,4})\\s*(${units})\\b`, "g"))];
+  if (quantities.length !== 1) return undefined;
+  const [quantity] = quantities;
+  // Find the type beside the quantity. Exclude the unrelated part of a mixed request.
+  const offset = quantity.index;
+  if (/[−–-]\s*$/.test(plain.slice(0,offset))) return undefined;
+  const before = plain.slice(0,offset).split(/[,;]|\bva\b/).at(-1) ?? "";
+  const after = plain.slice(offset+quantity[0].length).split(/[,;]|\bva\b/)[0];
+  const [topic] = classify(before + " " + after);
+  if (!topic || topic.id==="money") return undefined;
+  return { amount:Number(quantity[1]), unit:unitGroup(quantity[2]), topic:topic.id };
+}
+
+export type MatchResult = {
+  topics: {id:string;label:string}[];
+  goods: (Need & { available:number; requested?:number; suggested?:number })[];
+};
+
+export function findMatches(query: string, rows: Need[]): MatchResult {
   const matches = classify(query);
+  const quantity = quantityIntent(query);
   return {
     topics: matches.map(({id,label}) => ({id,label})),
     goods: rows.flatMap(need => {
       const score = matches.find(m => m.id === need.topic)?.score;
       const available = need.target - need.received - need.pledged;
-      return score && available > 0 ? [{...need, available, score}] : [];
-    }).sort((a,b) => b.score - a.score || b.available - a.available).slice(0,5),
+      if (!score || available<=0) return [];
+      const requested = quantity && need.topic===quantity.topic && unitGroup(need.unit)===quantity.unit ? quantity.amount : undefined;
+      return [{...need, available, requested, suggested:requested===undefined?undefined:Math.min(requested,available), score}];
+    }).sort((a,b) => b.score - a.score || b.available - a.available).slice(0,5).map(({score: _score, ...need})=>need),
   };
 }

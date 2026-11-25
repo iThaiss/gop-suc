@@ -58,3 +58,16 @@ test("AI nhận dạng tiếng Việt và số còn nhận lấy từ cơ sở d
   assert.equal(findMatches("bộ dụng cụ học tập",needs()).goods[0].available,28);
   assert.equal(findMatches("tôi có một cây đàn piano",needs()).goods.length,0);
 });
+
+test("AI chỉ điền số lượng cùng đơn vị và không vượt sức nhận", () => {
+  const rows=needs();
+  const school=(query:string)=>findMatches(query,rows).goods.find(n=>n.topic==="learning");
+  assert.equal(school("Mình có 15 bộ dụng cụ học tập")?.suggested,15);
+  const partial=school("Mình có 90 bộ dụng cụ học tập");
+  assert.equal(partial?.requested,90);
+  assert.equal(partial?.suggested,28);
+  assert.equal(school("Mình có 15 chiếc bút")?.suggested,undefined);
+  assert.equal(school("Mình có 15–20 bộ dụng cụ học tập")?.suggested,undefined);
+  assert.equal(school("Mình có 15 bộ dụng cụ học tập và 5 kg gạo")?.suggested,undefined);
+  assert.equal(findMatches("Tôi góp 5 ký gạo",rows).goods.find(n=>n.topic==="food")?.suggested,5);
+});

@@ -200,6 +200,9 @@ footer{border-top:1px solid var(--line)}
 .need>div.need-details{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
 .receipt-copy{display:inline-flex;align-items:center;gap:6px;justify-self:start;min-height:36px;padding:6px 9px;border:1px solid #8ba48d;border-radius:8px;background:var(--white);color:var(--forest);font-weight:700}
 .ai-result-action{margin-top:4px;font-weight:750;text-decoration:underline}
+.ai-result .match-complete,.ai-result .match-partial{justify-self:start;margin:4px 0;padding:3px 8px;border-radius:7px;font-weight:750;font-size:.875rem}
+.match-complete{color:#174b37;background:#e4eddf}
+.match-partial{color:#694d04;background:#fff2c4}
 .admin-grid{display:grid;grid-template-columns:minmax(245px,.72fr) minmax(0,1.8fr);gap:19px;align-items:start}
 .admin-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin:18px 0 20px}
 .admin-stats>div{display:flex;align-items:center;gap:12px;min-height:82px;padding:15px;background:var(--white);border:1px solid var(--line);border-radius:14px;color:var(--forest)}

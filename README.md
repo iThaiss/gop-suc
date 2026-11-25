@@ -24,7 +24,7 @@ SQLite tạo dữ liệu mẫu ở `.data/gopsuc.sqlite` trong lần chạy đ�
 | Giao diện và chia sẻ | `app/chien-dich`, `components/client.tsx` | Trang chiến dịch và cập nhật có URL riêng, ảnh Open Graph; hộp chia sẻ có nút Facebook, sao chép và menu chia sẻ nếu thiết bị hỗ trợ. |
 | Tiền và hiện vật | `app/api/gopsuc/route.ts`, `lib/db.ts` | Kiểm tra đầu vào ở máy chủ, cập nhật trong giao dịch SQLite, xác nhận tiền lặp chỉ cộng một lần. Lịch hẹn giữ chỗ hiện vật và ghi số thực nhận riêng. |
 | Quản trị và thu chi | `app/quan-tri`, `lib/session.ts` | Máy chủ kiểm tra vai trò trước thao tác. Chỉ quản trị viên có thể duyệt, đóng và ghi khoản chi. Các khoản chi vượt số dư bị từ chối. |
-| AI tìm cách góp | `lib/match.ts` | Phân loại gần nhất từ các câu tiếng Việt gắn nhãn. Chuẩn hóa dấu, dùng đặc trưng từ/cặp từ và tính độ tương đồng cosine. Sau khi nhận dạng loại hiện vật, lấy số lượng và lịch còn mở từ SQLite. |
+| AI tìm cách góp | `lib/match.ts` | Phân loại gần nhất từ các câu tiếng Việt gắn nhãn. Chuẩn hóa dấu, dùng đặc trưng từ/cặp từ và tính độ tương đồng cosine. Sau khi nhận dạng loại hiện vật, lấy số lượng và lịch còn mở từ SQLite. Nếu câu có một số lượng rõ ràng và cùng đơn vị, biểu mẫu điền sẵn tối đa số còn nhận. |
 
 Mô hình phân loại chạy cục bộ, dùng bộ ví dụ nhỏ và có ngưỡng từ chối. Đây là AI theo phạm vi hẹp, không cần khóa API. Người dùng vẫn có thể duyệt chiến dịch thủ công. Bản đồ án kế thừa luồng QR, số tiền nhanh, ẩn danh, công khai giao dịch và ảnh cập nhật từ ý tưởng A1K45. Mã trên repo này là bản đồ án riêng với dữ liệu demo, chức năng hiện vật, quản trị đa chiến dịch, tra cứu, chia sẻ và AI được triển khai cho đề tài mới.
 
@@ -32,7 +32,7 @@ Mô hình phân loại chạy cục bộ, dùng bộ ví dụ nhỏ và có ngư
 
 1. **Người 1 — khách ủng hộ và chia sẻ.** Mở chiến dịch lớp học, bấm chia sẻ, tạo QR 50k dưới chế độ ẩn danh và xác nhận. Mở lại bằng mã tra cứu để thấy khoản góp đã ghi nhận. Trình bày lý do số tiền chờ không có trong tổng tiền.
 2. **Người 2 — quản trị và minh bạch.** Tạo chiến dịch bằng vai trò người tổ chức. Đăng nhập vai trò quản trị viên để duyệt. Mở phần thu chi và thử ghi một khoản vượt số dư. Giải thích cách cookie phiên và API quản lý quyền.
-3. **Người 3 — hiện vật và AI.** Nhập “Mình có 15 bộ dụng cụ học tập”. Tạo phiếu hẹn rồi xác nhận thực nhận 12. Hỏi lại để thấy số còn thiếu giảm 12. Thử “mình có một cây đàn piano” để minh họa trường hợp không có nhu cầu phù hợp.
+3. **Người 3 — hiện vật và AI.** Nhập “Mình có 15 bộ dụng cụ học tập” rồi mở kết quả để thấy biểu mẫu điền sẵn 15 bộ. Tạo phiếu hẹn, xác nhận thực nhận 12, rồi thử nhập 90 bộ để thấy hệ thống chỉ đề xuất phần còn nhận. Hỏi “mình có một cây đàn piano” để minh họa trường hợp không có nhu cầu phù hợp.
 
 GitHub lưu lịch sử triển khai. Khi trình bày, ghi rõ phần nào được AI hỗ trợ tạo và phần nào nhóm tự kiểm tra, chỉnh sửa hoặc bổ sung. Mỗi thành viên nên chạy thử luồng mình trình bày và xem một tệp mã tương ứng.
 

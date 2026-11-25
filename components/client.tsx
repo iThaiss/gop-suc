@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Copy, Heart, Package, Share2, Sparkles, X } from "lucide-react";
 import { FacebookShareButton } from "react-share";
 import { money, type Campaign, type Need, type Receipt } from "../lib/domain";
+import type { MatchResult } from "../lib/match";
 
 export async function api<T>(data: object, signal?: AbortSignal): Promise<T> {
   const result = await fetch("/api/gopsuc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),signal});
@@ -80,7 +81,7 @@ export function GiveNeedButton({id,name}: {id:number;name:string}) {
   return <button type="button" className="button outline" aria-label={`Góp ${name.toLocaleLowerCase("vi")}`} onClick={()=>controls.open("goods",id)}>Góp món này</button>;
 }
 
-export function Give({campaign, needs, initialNeed, children}: {campaign:GivingControls["campaign"];needs:Need[];initialNeed?:number;children:ReactNode}) {
+export function Give({campaign, needs, initialNeed, initialAmount, children}: {campaign:GivingControls["campaign"];needs:Need[];initialNeed?:number;initialAmount?:number;children:ReactNode}) {
   const dialog=useRef<HTMLDialogElement>(null);
   const dialogTitle=useId();
   const router=useRouter();
@@ -102,15 +103,19 @@ export function Give({campaign, needs, initialNeed, children}: {campaign:GivingC
     dialog.current?.showModal();
     setDialogOpen(true);
   };
-  const directNeed=useRef<number | undefined>(undefined);
+  const directNeed=useRef<string | undefined>(undefined);
   useEffect(()=>{
-    if (!initialNeed || directNeed.current===initialNeed || campaign.status!=="active") return;
-    if (!needs.some(item=>item.id===initialNeed && item.target>item.received+item.pledged)) return;
-    directNeed.current=initialNeed;
-    setNeedId(initialNeed);setKind("goods");setAmount("1");setGift(undefined);setQr(undefined);setError("");
+    const key=[initialNeed,initialAmount].join(":");
+    if (!initialNeed || directNeed.current===key || campaign.status!=="active") return;
+    const item=needs.find(item=>item.id===initialNeed);
+    if (!item) return;
+    const remaining=item.target-item.received-item.pledged;
+    if (remaining<=0) return;
+    directNeed.current=key;
+    setNeedId(initialNeed);setKind("goods");setAmount(String(Math.min(initialAmount??1,remaining)));setGift(undefined);setQr(undefined);setError("");
     dialog.current?.showModal();
     setDialogOpen(true);
-  },[initialNeed,campaign.status,needs]);
+  },[initialNeed,initialAmount,campaign.status,needs]);
   const pendingCode=dialogOpen && gift?.kind==="cash" && gift.status==="pending" ? gift.code : undefined;
   useEffect(()=>{
     if (!pendingCode) return;
@@ -167,7 +172,7 @@ export function Give({campaign, needs, initialNeed, children}: {campaign:GivingC
           {!anonymous && <label>Tên hiển thị<input name="name" maxLength={60} required/></label>}
           <label>Lời nhắn công khai (tùy chọn)<textarea name="note" maxLength={240}/></label>
         </> : <>
-          <label>Hiện vật<select value={selected?.id} onChange={e=>setNeedId(Number(e.target.value))}>{availableNeeds.map(n=><option key={n.id} value={n.id}>{n.name}</option>)}</select></label>
+          <label>Hiện vật<select value={selected?.id} onChange={e=>{setNeedId(Number(e.target.value));setAmount("1");}}>{availableNeeds.map(n=><option key={n.id} value={n.id}>{n.name}</option>)}</select></label>
           {selected && <><label>Số lượng ({selected.unit})<input type="number" min={1} max={selected.target-selected.received-selected.pledged} value={amount} onChange={e=>setAmount(e.target.value)} required/></label><p>Còn nhận hẹn {selected.target-selected.received-selected.pledged} {selected.unit}. {selected.handoff}</p></>}
         </>}
         <button className="button" disabled={busy || (kind==="goods" && !selected)}>{busy?"Đang xử lý…":kind==="cash"?"Tạo QR demo":"Đăng ký bàn giao"}</button>
@@ -212,7 +217,7 @@ export function Matcher({titles}: {titles:Record<string,string>}) {
   const [query,setQuery]=useState("");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
-  const [result,setResult]=useState<{topics:{id:string;label:string}[];goods:(Need & {available:number})[]}>();
+  const [result,setResult]=useState<MatchResult>();
   async function suggest(text: string) {
     setQuery(text);setBusy(true);setError("");setResult(undefined);
     try { setResult(await api({action:"match",query:text})); }
@@ -227,7 +232,17 @@ export function Matcher({titles}: {titles:Record<string,string>}) {
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     {result && <div className="ai-result" aria-live="polite">
-      {result.goods.map(item=><a key={item.id} href={`/chien-dich/${item.slug}?mon=${item.id}#gop`}><b>{item.name}</b><span>{titles[item.slug]} · có thể đăng ký thêm {item.available} {item.unit}</span><span className="ai-result-action">Đăng ký góp</span></a>)}
+      {result.goods.map(item=>{
+        const formParams=new URLSearchParams({mon:String(item.id)});
+        if (item.suggested!==undefined) formParams.set("soLuong",String(item.suggested));
+        return <a key={item.id} href={`/chien-dich/${item.slug}?${formParams}#gop`}>
+          <b>{item.name}</b><span>{titles[item.slug]} · còn nhận {item.available} {item.unit}</span>
+          {item.suggested!==undefined && <span className={item.requested!==item.suggested?"match-partial":"match-complete"}>{item.requested===item.suggested
+            ? `Có thể nhận đủ ${item.suggested} ${item.unit}`
+            : `Có thể nhận ${item.suggested} trong ${item.requested} ${item.unit} bạn muốn góp`}</span>}
+          <small>{item.handoff}</small><span className="ai-result-action">Đăng ký góp</span>
+        </a>;
+      })}
       {result.topics.some(t=>t.id==="money") && <a href="#chien-dich"><b>Ủng hộ bằng tiền</b><span>Chọn chiến dịch để tạo QR demo.</span></a>}
       {!result.goods.length && !result.topics.some(t=>t.id==="money") && <p>Chưa tìm được nhu cầu phù hợp. Bạn có thể <a href="#chien-dich">xem các chiến dịch</a> hoặc mô tả rõ tên món đồ.</p>}
     </div>}

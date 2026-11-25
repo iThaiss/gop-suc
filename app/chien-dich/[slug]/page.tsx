@@ -8,7 +8,7 @@ import { campaign, expenses, needs, publicGifts, updates } from "../../../lib/db
 import { money, picture } from "../../../lib/domain";
 
 export const dynamic = "force-dynamic";
-type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string}>};
+type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string;soLuong?:string}>};
 export async function generateMetadata({params}:Props):Promise<Metadata> {
   const c=campaign((await params).slug);
   if (!c || c.status==="draft") return {};
@@ -18,10 +18,12 @@ export async function generateMetadata({params}:Props):Promise<Metadata> {
 export default async function CampaignPage({params,searchParams}:Props) {
   const c=campaign((await params).slug);
   if (!c || c.status==="draft") notFound();
-  const {mon}=await searchParams;
+  const {mon,soLuong}=await searchParams;
   const items=needs(c.slug), posts=updates(c.slug), bills=expenses(c.slug), gifts=publicGifts(c.slug);
   const percent=Math.min(100,Math.floor(c.received/c.goal*100));
-  return <Give campaign={{slug:c.slug,title:c.title,status:c.status}} needs={items.map(item=>({...item}))} initialNeed={typeof mon==="string" ? Number(mon)||undefined : undefined}>
+  return <Give campaign={{slug:c.slug,title:c.title,status:c.status}} needs={items.map(item=>({...item}))}
+    initialNeed={typeof mon==="string" && /^[1-9]\d{0,14}$/.test(mon) ? Number(mon) : undefined}
+    initialAmount={typeof soLuong==="string" && /^[1-9]\d{0,5}$/.test(soLuong) ? Number(soLuong) : undefined}>
     <div className="shell detail"><Link href="/#chien-dich" className="back">Tất cả chiến dịch</Link>
     <div className="detail-hero">
       <div className="detail-photo"><Image src={picture(c.cover)} alt="Ảnh minh họa chiến dịch" fill sizes="(max-width: 880px) 100vw, 58vw" preload/></div>
