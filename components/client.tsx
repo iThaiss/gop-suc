@@ -140,10 +140,17 @@ export function Matcher({titles}: {titles:Record<string,string>}) {
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [result,setResult]=useState<{topics:{id:string;label:string}[];goods:(Need & {available:number})[]}>();
-  return <div className="ai-box" id="tim-cach-gop"><div><Sparkles size={24}/><h2>Tìm cách góp phù hợp</h2><p>Mô tả bằng tiếng Việt thứ bạn có thể góp.</p></div>
-    <form className="form" onSubmit={async e=>{e.preventDefault();setBusy(true);setError("");setResult(undefined);try{setResult(await api({action:"match",query}));}catch(err){setError(getError(err));}finally{setBusy(false);}}}>
+  async function suggest(text: string) {
+    setQuery(text);setBusy(true);setError("");setResult(undefined);
+    try { setResult(await api({action:"match",query:text})); }
+    catch (err) { setError(getError(err)); }
+    finally { setBusy(false); }
+  }
+  return <section className="ai-box" id="tim-cach-gop"><div><span className="ai-icon"><Sparkles size={24}/></span><h2>Bạn có gì để góp?</h2><p>AI gợi ý nơi đang cần món đồ của bạn, dựa trên số lượng còn nhận.</p></div>
+    <form className="form" onSubmit={e=>{e.preventDefault();void suggest(query);}}>
       <label>Bạn muốn góp gì?<input value={query} onChange={e=>setQuery(e.target.value)} maxLength={220} required placeholder="Ví dụ: Mình có 15 bộ dụng cụ học tập"/></label>
       <button className="button" disabled={busy}>{busy?"Đang tìm…":"Gợi ý bằng AI"}</button>
+      <div className="ai-examples" aria-label="Gợi ý để thử">{["Mình có 15 bộ dụng cụ học tập","Mình có gạo đóng túi","Mình muốn góp tiền"].map(text=><button key={text} type="button" disabled={busy} onClick={()=>void suggest(text)}>{text}</button>)}</div>
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     {result && <div className="ai-result" aria-live="polite">
@@ -151,5 +158,5 @@ export function Matcher({titles}: {titles:Record<string,string>}) {
       {result.topics.some(t=>t.id==="money") && <a href="#chien-dich"><b>Ủng hộ bằng tiền</b><span>Chọn chiến dịch để tạo QR demo.</span></a>}
       {!result.goods.length && !result.topics.some(t=>t.id==="money") && <p>Chưa tìm được nhu cầu phù hợp. Bạn có thể <a href="#chien-dich">xem các chiến dịch</a> hoặc mô tả rõ tên món đồ.</p>}
     </div>}
-  </div>;
+  </section>;
 }

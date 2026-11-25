@@ -1,39 +1,82 @@
 import Image from "next/image";
 import Link from "next/link";
-import { MapPin } from "lucide-react";
+import { HeartHandshake, MapPin, PackageCheck, Search, Wallet } from "lucide-react";
 import { Matcher } from "../components/client";
-import { campaigns } from "../lib/db";
+import { campaigns, needs } from "../lib/db";
 import { categories, money, picture } from "../lib/domain";
 
 export const dynamic = "force-dynamic";
-export default async function Home({searchParams}: {searchParams:Promise<{nhom?:string}>}) {
-  const {nhom}=await searchParams;
-  const rows=campaigns();
-  const filtered=rows.filter(c=>!nhom || c.category===nhom);
+
+function searchable(value: string) {
+  return value.toLocaleLowerCase("vi").normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d");
+}
+
+export default async function Home({searchParams}: {searchParams:Promise<{nhom?:string;q?:string}>}) {
+  const params = await searchParams;
+  const category = categories.find(name => name === params.nhom) ?? "";
+  const query = typeof params.q === "string" ? params.q.trim().slice(0, 90) : "";
+  const rows = campaigns();
+  const active = rows.filter(c => c.status === "active");
+  const featured = active[0];
+  const filtered = rows.filter(c => (!category || c.category === category) &&
+    (!query || searchable([c.title, c.location, c.category].join(" ")).includes(searchable(query))));
+  const total = rows.reduce((sum, c) => sum + c.received, 0);
+  const openNeeds = needs().filter(n => n.target > n.received + n.pledged);
+  const filterUrl = (name: string) => {
+    const search = new URLSearchParams();
+    if (name) search.set("nhom", name);
+    if (query) search.set("q", query);
+    return (search.size ? "/?" + search : "/") + "#chien-dich";
+  };
+
   return <div className="shell home">
-    <section className="hero">
+    <section className="hero masthead">
+      <Image className="masthead-photo" src={picture(featured?.cover ?? "school")} alt="" fill sizes="100vw" preload/>
       <div className="hero-copy">
-        <span className="demo-label">Bản demo đồ án</span>
-        <h1>Góp một phần.<br/>Cùng làm nên<br/><em>điều tử tế.</em></h1>
-        <p>Chọn một việc bạn muốn góp sức. Theo dõi từng khoản ủng hộ, món đồ được nhận và kết quả bàn giao.</p>
-        <div className="row"><a className="button" href="#chien-dich">Xem chiến dịch</a><a className="button outline" href="#tim-cach-gop">Tìm cách góp</a></div>
+        <span className="demo-label">Bản demo gây quỹ cộng đồng</span>
+        <h1>Cùng góp sức<br/>cho <em>điều tử tế.</em></h1>
+        <p>Góp tiền hoặc hiện vật cho những việc cụ thể. Theo dõi từ lúc đóng góp đến khi bàn giao.</p>
+        <div className="row"><a className="button" href="#chien-dich">Khám phá chiến dịch</a><a className="button outline" href="#tim-cach-gop">Tìm nơi cần đồ bạn có</a></div>
       </div>
-      <div className="hero-photo"><Image src={picture("school")} alt="Tình nguyện viên chuẩn bị đồ dùng học tập, ảnh minh họa" fill sizes="(max-width: 760px) 100vw, 55vw" priority/></div>
+      {featured && <Link href={"/chien-dich/" + featured.slug} className="masthead-story">
+        <span><MapPin size={15}/>{featured.location}</span><strong>{featured.title}</strong>
+      </Link>}
+    </section>
+    <section className="impact" aria-label="Tổng quan dữ liệu demo">
+      <div><Wallet size={23}/><span><strong>{money(total)}</strong><small>Đóng góp đã ghi nhận</small></span></div>
+      <div><HeartHandshake size={23}/><span><strong>{active.length}</strong><small>Chiến dịch đang nhận</small></span></div>
+      <div><PackageCheck size={23}/><span><strong>{openNeeds.length}</strong><small>Nhu cầu hiện vật còn mở</small></span></div>
+      <span className="impact-note">Số liệu mô phỏng</span>
     </section>
     <section className="campaigns" id="chien-dich">
-      <div className="section-head"><div><h2>Chiến dịch cộng đồng</h2><p>Chọn một chiến dịch để xem những gì đang cần.</p></div>
-        <nav className="filters" aria-label="Lọc theo chủ đề">{["",...categories].map(c=><Link key={c} href={c?`/?nhom=${encodeURIComponent(c)}#chien-dich`:"/#chien-dich"} aria-current={(nhom||"")===c?"true":undefined}>{c||"Tất cả"}</Link>)}</nav>
+      <div className="section-head">
+        <div><h2>Tìm chiến dịch</h2><p>Chọn một việc bạn muốn góp sức.</p></div>
+        <form className="campaign-search" action="/#chien-dich">
+          {category && <input type="hidden" name="nhom" value={category}/>}
+          <input aria-label="Tên chiến dịch hoặc khu vực" name="q" type="search" defaultValue={query} placeholder="Tên chiến dịch hoặc khu vực" maxLength={90}/>
+          <button className="icon" type="submit" aria-label="Tìm chiến dịch"><Search size={19}/></button>
+        </form>
       </div>
-      <div className="cards">{filtered.map(c=><article className="card" key={c.slug}>
-        <Link href={`/chien-dich/${c.slug}`} className="card-photo" aria-label={c.title}><Image src={picture(c.cover)} alt="" fill sizes="(max-width: 740px) 100vw, 34vw"/></Link>
-        <div className="card-content"><div className="meta"><span>{c.category}</span><span><MapPin size={14}/>{c.location}</span></div>
-          <h3><Link href={`/chien-dich/${c.slug}`}>{c.title}</Link></h3>
-          <progress aria-label="Tiến độ tiền đã nhận" value={Math.min(c.received,c.goal)} max={c.goal}/>
-          <p><strong>{money(c.received)}</strong> / {money(c.goal)}</p>
-          <Link className="card-link" href={`/chien-dich/${c.slug}`}>{c.status==="closed"?"Xem kết quả":"Xem chiến dịch"}</Link></div>
-      </article>)}</div>
-      {!filtered.length && <p>Chưa có chiến dịch trong nhóm này.</p>}
+      <nav className="filters discovery-filters" aria-label="Lọc theo chủ đề">{["",...categories].map(c => <Link key={c} href={filterUrl(c)} aria-current={category === c ? "true" : undefined}>{c || "Tất cả"}</Link>)}</nav>
+      <div className="cards">{filtered.map(c => {
+        const path = "/chien-dich/" + c.slug;
+        const percent = Math.min(100, Math.floor(c.received / c.goal * 100));
+        return <article className="card" key={c.slug}>
+          <Link href={path} className="card-photo" aria-label={c.title}>
+            <Image src={picture(c.cover)} alt="" fill sizes="(max-width: 650px) 100vw, (max-width: 950px) 50vw, 34vw"/>
+            <span className="photo-category">{c.category}</span>
+          </Link>
+          <div className="card-content"><div className="card-place"><MapPin size={15}/>{c.location}{c.status === "closed" && <span>Đã kết thúc</span>}</div>
+            <h3><Link href={path}>{c.title}</Link></h3>
+            <p className="card-description">{c.description}</p>
+            <div className="card-progress"><span><strong>{money(c.received)}</strong> đã góp</span><b>{percent}%</b></div>
+            <progress aria-label="Tiến độ tiền đã nhận" value={Math.min(c.received,c.goal)} max={c.goal}/>
+            <Link className="card-link" href={path}>{c.status === "closed" ? "Xem kết quả" : "Xem chiến dịch"}</Link>
+          </div>
+        </article>;
+      })}</div>
+      {!filtered.length && <div className="empty-campaigns"><p>Chưa tìm thấy chiến dịch phù hợp.</p><Link href="/#chien-dich">Xem tất cả chiến dịch</Link></div>}
     </section>
-    <Matcher titles={Object.fromEntries(rows.map(c=>[c.slug,c.title]))}/>
+    <Matcher titles={Object.fromEntries(rows.map(c => [c.slug,c.title]))}/>
   </div>;
 }

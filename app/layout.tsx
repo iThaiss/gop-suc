@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { HeartHandshake, Search } from "lucide-react";
 import { publicBase } from "../lib/domain";
+import "@fontsource-variable/manrope";
 import "./style.css";
 
 export const metadata: Metadata = {
