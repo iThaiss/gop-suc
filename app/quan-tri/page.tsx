@@ -2,10 +2,14 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { ClipboardCheck, HandHeart, Package, Plus, Wallet } from "lucide-react";
 import { ActionForm } from "../../components/admin";
+import { CoordinationBoard } from "../../components/coordination-board";
+import { JournalDraftFields } from "../../components/journal-draft";
+import { Share } from "../../components/client";
 import { campaigns, expenses, GOODS_PAGE_SIZE, needs, pendingCounts, pendingGoods, updates, volunteerShifts } from "../../lib/db";
 import { categories, covers, money, vietnamTime, type Campaign } from "../../lib/domain";
 import { topics } from "../../lib/match";
 import { sessionCookie, sessionRole } from "../../lib/session";
+import { canManageCampaign, coordinationTasks, journalDraft } from "../../lib/coordination";
 
 export const metadata={title:"Quản trị"};
 export const dynamic="force-dynamic";
@@ -46,27 +50,32 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
   </ActionForm></section>;
 
   const params=await searchParams;
-  const rows=(await campaigns(false)).filter(c=>role==="admin"||c.owner===role);
+  const rows=(await campaigns(false)).filter(c=>canManageCampaign(role,c));
   const selected=rows.find(c=>c.slug===params.chien)??rows[0];
   const tab=(Object.keys(tabs) as Tab[]).find(key=>key===params.muc)??"overview";
+  const showBoard=!params.chien;
   const counts=await pendingCounts();
   const queued=rows.reduce((total,c)=>total+(counts.get(c.slug)??0),0);
   const count=selected ? counts.get(selected.slug)??0 : 0;
   const pages=Math.max(1,Math.ceil(count/GOODS_PAGE_SIZE));
   const page=Math.min(pages,Math.max(1,Math.floor(Number(params.trang)||1)));
-  const queue=selected&&tab==="handoff" ? await pendingGoods(selected.slug,(page-1)*GOODS_PAGE_SIZE) : [];
-  const items=selected && tab==="overview" ? await needs(selected.slug) : [];
-  const posts=selected && tab==="journal" ? await updates(selected.slug) : [];
-  const bills=selected && tab==="journal" ? await expenses(selected.slug) : [];
-  const shifts=selected && tab==="volunteer" ? await volunteerShifts(selected.slug) : [];
+  const [queue,items,posts,bills,shifts,boardShifts]=await Promise.all([
+    selected&&tab==="handoff" ? pendingGoods(selected.slug,(page-1)*GOODS_PAGE_SIZE) : [],
+    selected&&(tab==="overview"||tab==="journal") ? needs(selected.slug) : [],
+    selected&&tab==="journal" ? updates(selected.slug) : [],
+    selected&&tab==="journal" ? expenses(selected.slug) : [],
+    selected&&tab==="volunteer" ? volunteerShifts(selected.slug) : [],
+    showBoard ? Promise.all(rows.filter(row=>row.status==="active").map(row=>volunteerShifts(row.slug))) : [],
+  ]);
 
   return <div className="shell admin">
-    <div className="section-head"><div><h1>Quản trị chiến dịch</h1><p>{role==="admin"?"Quản trị viên":"Người tổ chức"}</p></div><ActionForm action="logout" label="Đăng xuất" tone="secondary"/></div>
+    <div className="section-head"><div><h1>Quản trị chiến dịch</h1><p>{role==="admin"?"Quản trị viên":"Người tổ chức"}</p></div><div className="row">{!showBoard&&<Link className="button outline" href="/quan-tri#ban-dieu-phoi">Bàn điều phối</Link>}<ActionForm action="logout" label="Đăng xuất" tone="secondary"/></div></div>
     <div className="admin-stats" aria-label="Tổng quan chiến dịch">
       <div><HandHeart size={23}/><span><strong>{rows.filter(c=>c.status==="active").length}</strong>Đang nhận góp</span></div>
       <div><ClipboardCheck size={23}/><span><strong>{rows.filter(c=>c.status==="draft").length}</strong>Chờ duyệt</span></div>
       <div><Package size={23}/><span><strong>{queued}</strong>Phiếu chờ bàn giao</span></div>
     </div>
+    {showBoard&&<CoordinationBoard role={role} tasks={coordinationTasks(role,rows,counts,boardShifts.flat())}/>}
     <div className="admin-grid">
       <aside className="panel admin-sidebar">
         <h2>Chiến dịch của bạn</h2>
@@ -86,7 +95,7 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
         {tab==="overview" && <>
           <div className="admin-money"><Wallet size={20}/><dl className="ledger"><div><dt>Đã nhận</dt><dd>{money(selected.received)}</dd></div><div><dt>Đã chi</dt><dd>{money(selected.spent)}</dd></div><div><dt>Còn lại</dt><dd>{money(selected.received-selected.spent)}</dd></div></dl></div>
           <p>{selected.description}</p>
-          {selected.status==="draft" && <details className="admin-disclosure"><summary>Chỉnh sửa bản chờ duyệt</summary>
+          {selected.status==="draft" && <details className="admin-disclosure" id="duyet"><summary>Chỉnh sửa bản chờ duyệt</summary>
             <ActionForm action="editDraft" slug={selected.slug} label="Lưu thay đổi" numeric={["goal"]}><CampaignFields campaign={selected}/></ActionForm>
           </details>}
           {role==="admin" && selected.status==="draft" && <ActionForm slug={selected.slug} action="publish" label="Duyệt và công bố"/>}
@@ -101,7 +110,7 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
           </details>}
         </>}
         {tab==="handoff" && <>
-          <h3>Hiện vật chờ bàn giao</h3>{queue.map(g=><details className="admin-disclosure" key={g.code}>
+          <h3 id="ban-giao">Hiện vật chờ bàn giao</h3>{queue.map(g=><details className="admin-disclosure" key={g.code}>
             <summary>{g.needName} · hẹn {g.amount} {g.unit}</summary><p>{g.handoff}</p><small>Mã <code>{g.code}</code></small>
             <ActionForm action="receive" slug={g.slug} label="Xác nhận đã nhận" numeric={["actual"]}><input type="hidden" name="code" value={g.code}/><label>Số thực nhận<input name="actual" type="number" min="1" max={g.amount} defaultValue={g.amount} required/></label></ActionForm>
             <ActionForm action="cancel" slug={g.slug} label="Hủy hẹn" tone="secondary"><input type="hidden" name="code" value={g.code}/></ActionForm>
@@ -112,9 +121,11 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
         </>}
         {tab==="volunteer" && <>
           <h3>Ca tình nguyện</h3>
-          {shifts.length ? <ul className="admin-need-list">{shifts.map(shift=><li key={shift.id}>
+          {shifts.length ? <ul className="admin-need-list">{shifts.map(shift=><li key={shift.id} id={`ca-${shift.id}`}>
             <div><b>{shift.title}</b><p>{vietnamTime(shift.startsAt)} · {shift.location}</p></div>
-            <span>{shift.reserved}/{shift.capacity} đã giữ chỗ</span>
+            <div className="admin-shift-actions"><span>{shift.reserved}/{shift.capacity} đã giữ chỗ</span>
+              {selected.status==="active"&&Date.parse(shift.startsAt)>Date.now()&&shift.reserved<shift.capacity&&<Share path={`/chien-dich/${selected.slug}?ca=${shift.id}#tinh-nguyen`} title={shift.title}/>}
+            </div>
           </li>)}</ul> : <p>Chưa có ca tình nguyện.</p>}
           {selected.status!=="closed" && <details className="admin-disclosure"><summary><Plus size={18}/> Tạo ca</summary>
             <ActionForm action="addShift" slug={selected.slug} label="Lưu ca tình nguyện" numeric={["capacity"]}>
@@ -127,7 +138,7 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
           <h3>Nhật ký</h3>{posts.length ? <ul className="admin-need-list">{posts.map(post=><li key={post.id}><b>{post.title}</b><span>{post.created.slice(0,10)}</span></li>)}</ul> : <p>Chưa có bài cập nhật.</p>}
           <details className="admin-disclosure"><summary><Plus size={18}/> Đăng cập nhật</summary>
             <ActionForm action="update" slug={selected.slug} label="Đăng bài">
-              <label>Tiêu đề<input name="title" maxLength={100} required/></label><label>Nội dung<textarea name="body" maxLength={900} required/></label><label>Ảnh minh họa<CoverChoice optional/></label>
+              <JournalDraftFields draft={journalDraft(selected,items)}/><label>Ảnh minh họa<CoverChoice optional/></label>
               <label>Ảnh bàn giao<input type="file" name="photo" accept="image/jpeg,image/png,image/webp"/></label>
               <small>JPEG, PNG hoặc WebP, tối đa 4 MB. Nếu tải ảnh lên, ảnh này sẽ thay ảnh minh họa khi bài xuất hiện công khai.</small>
             </ActionForm>

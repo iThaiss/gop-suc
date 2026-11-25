@@ -82,6 +82,15 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const draft = { action: "create", slug, title, description: "Dữ liệu kiểm thử riêng.", category: "Giáo dục", location: "Huế", cover: "school", goal: 100_000 };
   assert.equal((await post(draft)).status, 401);
   assert.equal((await post(draft, organizer)).status, 200);
+  const adminOnly={...draft,slug:"noi-bo-cua-quan-tri",title:"Bản nháp chỉ quản trị viên xem"};
+  assert.equal((await post(adminOnly,admin)).status,200);
+  const panel=async (url,cookie)=>await (await fetch(`${origin}/quan-tri${url}`,{headers:cookie?{cookie}:{}})).text();
+  assert.doesNotMatch(await panel("",null),/id="ban-dieu-phoi"/);
+  const orgBoard=await panel("",organizer);
+  assert.match(orgBoard,/id="ban-dieu-phoi"/);
+  assert.match(orgBoard,/muc=overview(?:&amp;[^#]+)?#duyet/);
+  assert.ok(!orgBoard.includes(adminOnly.title));
+  assert.ok((await panel("",admin)).includes(adminOnly.title));
   const path = `${origin}/chien-dich/${slug}`;
   assert.equal((await fetch(path)).status, 404);
 
@@ -105,6 +114,12 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const booking = await post({action:"contribute",slug,kind:"goods",amount:8,needId:need.id,anonymous:true});
   assert.equal(booking.status, 201);
   const {gift:pledge} = await booking.json();
+  const startsLocal=new Date(Date.now()+19*3_600_000).toISOString().slice(0,16); // 12 hours ahead in Viet Nam.
+  assert.equal((await post({action:"addShift",slug,title:"Ca tập trung sớm",location:"Điểm nhận thử",startLocal:startsLocal,capacity:5},organizer)).status,200);
+  const operations=await panel("",organizer);
+  assert.match(operations,/muc=handoff#ban-giao/);
+  assert.match(operations,/muc=volunteer#ca-\d+/);
+  assert.match(operations,/Ca tập trung sớm/);
   const basicLookup = await (await post({action:"lookup",code:pledge.code})).json();
   assert.equal(basicLookup.gift.status, "pending");
   assert.ok(!("impact" in basicLookup));
@@ -115,6 +130,9 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const {gift,impact} = await lookup.json();
   assert.equal(gift.amount, 8);
   assert.equal(gift.actual, 6);
+  const draftView=await panel(`?chien=${slug}&muc=journal`,organizer);
+  assert.match(draftView,/Soạn nháp từ số liệu/);
+  assert.match(draftView,/đã nhận 6 bộ, đang hẹn giao 0 bộ/);
   assert.deepEqual(Object.keys(impact).sort(), ["goal","received","slug","spent","status","title","updates"]);
   assert.deepEqual(impact.updates.map(post=>post.title), updateTitles.slice(1).reverse());
   assert.ok(!JSON.stringify(impact).includes(pledge.code));
