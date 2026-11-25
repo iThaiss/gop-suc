@@ -14,6 +14,7 @@ const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(70);
 const code = z.string().regex(/^[a-f0-9]{32}$/);
 const amount = z.number().int().min(1).max(1_000_000_000);
 const manageCommon = {slug};
+const campaignFields = {title:string(100),description:string(900),category:z.enum(categories),location:string(60),cover:z.enum(covers),goal:amount};
 const schema = z.discriminatedUnion("action",[
   z.object({action:z.literal("contribute"), slug, kind:z.enum(["cash","goods"]), amount, needId:z.number().int().positive().optional(), anonymous:z.boolean(), name:z.string().trim().max(60).optional(), note:z.string().trim().max(240).optional()}),
   z.object({action:z.literal("confirm"),code}),
@@ -21,7 +22,8 @@ const schema = z.discriminatedUnion("action",[
   z.object({action:z.literal("match"),query:string(220)}),
   z.object({action:z.literal("login"),role:z.enum(["admin","organizer"]),password:string(200)}),
   z.object({action:z.literal("logout")}),
-  z.object({action:z.literal("create"),...manageCommon,title:string(100),description:string(900),category:z.enum(categories),location:string(60),cover:z.enum(covers),goal:amount}),
+  z.object({action:z.literal("create"),...manageCommon,...campaignFields}),
+  z.object({action:z.literal("editDraft"),...manageCommon,...campaignFields}),
   z.object({action:z.literal("publish"),...manageCommon}),
   z.object({action:z.literal("close"),...manageCommon}),
   z.object({action:z.literal("need"),...manageCommon,name:string(100),unit:string(30),target:z.number().int().min(1).max(100_000),handoff:string(180),topic:z.enum(topics.map(t=>t.id).filter(id=>id!=="money"))}),

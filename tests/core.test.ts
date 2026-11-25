@@ -33,9 +33,14 @@ test("hẹn giao không vượt mục tiêu và cho phép xác nhận số thự
 test("phân quyền duyệt, ghi chi và đóng chiến dịch", () => {
   manage("organizer","kiem-thu","create",{title:"Kiểm thử",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:200000});
   assert.equal(campaign("kiem-thu")!.status,"draft");
+  const updated={title:"Tên đã sửa",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:300000};
+  manage("organizer","kiem-thu","editDraft",updated);
+  assert.equal(campaign("kiem-thu")!.title,"Tên đã sửa");
+  assert.equal(campaign("kiem-thu")!.goal,300000);
   assert.throws(()=>manage("organizer","kiem-thu","publish",{}),/quản trị/);
   assert.throws(()=>contribute({slug:"kiem-thu",kind:"cash",amount:5000}),/ngừng/);
   manage("admin","kiem-thu","publish",{});
+  assert.throws(()=>manage("organizer","kiem-thu","editDraft",updated),/chờ duyệt/);
   assert.throws(()=>manage("admin","kiem-thu","expense",{title:"A",amount:1,evidence:"B"}),/số dư/);
   manage("admin","kiem-thu","close",{});
   assert.throws(()=>contribute({slug:"kiem-thu",kind:"cash",amount:5000}),/ngừng/);

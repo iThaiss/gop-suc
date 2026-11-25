@@ -88,7 +88,9 @@ export const updates = (slug: string) => db().prepare("SELECT * FROM updates WHE
 export const expenses = (slug: string) => db().prepare("SELECT id,title,amount,evidence,created FROM expenses WHERE slug=? ORDER BY id DESC").all(slug) as unknown as Expense[];
 export const publicGifts = (slug: string) => db().prepare("SELECT COALESCE(name,'****') AS name,amount,note FROM receipts WHERE slug=? AND kind='cash' AND status='confirmed' ORDER BY rowid DESC LIMIT 8").all(slug) as unknown as {name:string;amount:number;note:string|null}[];
 export const receipt = (code: string) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.code=?`).get(code) as Receipt | undefined;
-export const pendingGoods = (slug: string) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.slug=? AND r.status='pending' AND r.kind='goods' ORDER BY r.rowid DESC LIMIT 100`).all(slug) as unknown as Receipt[];
+export const GOODS_PAGE_SIZE = 15;
+export const pendingGoods = (slug: string, offset = 0) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.slug=? AND r.status='pending' AND r.kind='goods' ORDER BY r.rowid DESC LIMIT ? OFFSET ?`).all(slug, GOODS_PAGE_SIZE, offset) as unknown as Receipt[];
+export const pendingCounts = () => new Map(db().prepare("SELECT slug, COUNT(*) AS count FROM receipts WHERE kind='goods' AND status='pending' GROUP BY slug").all().map(row => [String(row.slug), Number(row.count)]));
 
 export class RuleError extends Error {}
 
@@ -138,7 +140,11 @@ export function manage(role: Role, slug: string, action: string, input: Record<s
       return;
     }
     if (!c || (role !== "admin" && c.owner !== role)) throw new RuleError("Bạn không có quyền với chiến dịch này.");
-    if (action === "publish" || action === "close") {
+    if (action === "editDraft") {
+      if (c.status !== "draft") throw new RuleError("Chỉ chỉnh sửa được chiến dịch đang chờ duyệt.");
+      d.prepare("UPDATE campaigns SET title=?,description=?,category=?,location=?,cover=?,goal=? WHERE slug=?")
+        .run(input.title,input.description,input.category,input.location,input.cover,input.goal,slug);
+    } else if (action === "publish" || action === "close") {
       if (role !== "admin") throw new RuleError("Cần quyền quản trị.");
       if ((action === "publish" && c.status !== "draft") || (action === "close" && c.status !== "active")) throw new RuleError("Trạng thái hiện tại không cho phép thao tác này.");
       d.prepare("UPDATE campaigns SET status=? WHERE slug=?").run(action === "publish" ? "active" : "closed",slug);
