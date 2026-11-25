@@ -17,6 +17,8 @@ SQLite tạo dữ liệu mẫu ở `.data/gopsuc.sqlite` trong lần chạy đ�
 
 ## Cách hệ thống hoạt động
 
+Để tập bảo vệ với dữ liệu mẫu mới, chạy `npm run build` rồi `npm run preview:clean` và mở [127.0.0.1:3101](http://127.0.0.1:3101). Mỗi lần khởi động tạo một tệp SQLite riêng và giữ dữ liệu đang dùng ở cổng 3100. Nếu cần dùng trang quản trị ở bản dựng này, đặt mật khẩu theo hướng dẫn production ở trên.
+
 | Phần | Nơi đọc mã | Quy tắc |
 |---|---|---|
 | Giao diện và chia sẻ | `app/chien-dich`, `components/client.tsx` | Trang chiến dịch và cập nhật có URL riêng, ảnh Open Graph; hộp chia sẻ có nút Facebook, sao chép và menu chia sẻ nếu thiết bị hỗ trợ. |

@@ -1,13 +1,13 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Copy, Heart, Package, Share2, Sparkles, X } from "lucide-react";
 import { FacebookShareButton } from "react-share";
 import { money, type Campaign, type Need, type Receipt } from "../lib/domain";
 
-export async function api<T>(data: object): Promise<T> {
-  const result = await fetch("/api/gopsuc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+export async function api<T>(data: object, signal?: AbortSignal): Promise<T> {
+  const result = await fetch("/api/gopsuc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),signal});
   const body = await result.json();
   if (!result.ok) throw new Error(body.error ?? "Yêu cầu chưa thành công.");
   return body as T;
@@ -43,15 +43,46 @@ export function Share({ path, title }: {path:string;title:string}) {
 }
 
 function ReceiptView({ gift }: {gift:Receipt}) {
+  const [copyMessage,setCopyMessage]=useState("");
   return <div className="ticket"><strong>{gift.kind==="cash" ? money(gift.amount) : `${gift.amount} ${gift.unit} · ${gift.needName}`}</strong>
     <span>{gift.status==="confirmed" ? gift.kind==="goods" ? `Đã nhận ${gift.actual} ${gift.unit}` : "Đã ghi nhận khoản ủng hộ" : gift.status==="cancelled" ? "Đã hủy hẹn" : gift.kind==="cash" ? "Đang chờ xác nhận" : "Đã đăng ký · chờ bàn giao"}</span>
     {gift.handoff && <span>{gift.handoff}</span>}
     <label>Mã tra cứu<input value={gift.code} readOnly onFocus={event=>event.currentTarget.select()}/></label>
+    <button type="button" className="receipt-copy" onClick={async()=>{
+      try { await navigator.clipboard.writeText(gift.code);setCopyMessage("Đã sao chép mã tra cứu."); }
+      catch { setCopyMessage("Chọn và sao chép mã trong ô bên trên."); }
+    }}><Copy size={15}/> Sao chép mã</button>
+    {copyMessage && <small role="status">{copyMessage}</small>}
   </div>;
 }
 
-export function Give({campaign, needs, initialNeed}: {campaign:Pick<Campaign,"slug"|"title"|"status">;needs:Need[];initialNeed?:number}) {
+type GivingControls = {
+  campaign: Pick<Campaign,"slug"|"title"|"status">;
+  available: Need[];
+  open: (kind: "cash"|"goods", itemId?: number) => void;
+};
+const GivingContext = createContext<GivingControls | null>(null);
+
+export function GiveActions() {
+  const controls=useContext(GivingContext);
+  if (!controls) return null;
+  const {campaign,available,open}=controls;
+  return <div className="give-actions">
+    {campaign.status==="active" && <button type="button" className="button" onClick={()=>open("cash")}><Heart size={18}/> Ủng hộ tiền</button>}
+    {campaign.status==="active" && available.length>0 && <button type="button" className="button outline" onClick={()=>open("goods")}><Package size={18}/> Góp hiện vật</button>}
+    <Share path={`/chien-dich/${campaign.slug}`} title={campaign.title}/>
+  </div>;
+}
+
+export function GiveNeedButton({id,name}: {id:number;name:string}) {
+  const controls=useContext(GivingContext);
+  if (!controls || !controls.available.some(item=>item.id===id)) return null;
+  return <button type="button" className="button outline" aria-label={`Góp ${name.toLocaleLowerCase("vi")}`} onClick={()=>controls.open("goods",id)}>Góp món này</button>;
+}
+
+export function Give({campaign, needs, initialNeed, children}: {campaign:GivingControls["campaign"];needs:Need[];initialNeed?:number;children:ReactNode}) {
   const dialog=useRef<HTMLDialogElement>(null);
+  const dialogTitle=useId();
   const router=useRouter();
   const [kind,setKind]=useState<"cash"|"goods">("cash");
   const [needId,setNeedId]=useState(initialNeed ?? needs[0]?.id ?? 0);
@@ -61,11 +92,47 @@ export function Give({campaign, needs, initialNeed}: {campaign:Pick<Campaign,"sl
   const [qr,setQr]=useState<string>();
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
-  const availableNeeds=needs.filter(n=>n.target-n.received-n.pledged>0);
+  const [dialogOpen,setDialogOpen]=useState(false);
+  const availableNeeds=campaign.status==="active" ? needs.filter(n=>n.target-n.received-n.pledged>0) : [];
   const selected=availableNeeds.find(n=>n.id===needId) ?? availableNeeds[0];
-  const open=(next:"cash"|"goods")=>{
-    setKind(next);setGift(undefined);setQr(undefined);setError("");setAmount(next==="cash"?"50000":"1");dialog.current?.showModal();
+  const open=(next:"cash"|"goods", itemId?:number)=>{
+    if (busy) return;
+    if (itemId) setNeedId(itemId);
+    setKind(next);setGift(undefined);setQr(undefined);setError("");setAmount(next==="cash"?"50000":"1");
+    dialog.current?.showModal();
+    setDialogOpen(true);
   };
+  const directNeed=useRef<number | undefined>(undefined);
+  useEffect(()=>{
+    if (!initialNeed || directNeed.current===initialNeed || campaign.status!=="active") return;
+    if (!needs.some(item=>item.id===initialNeed && item.target>item.received+item.pledged)) return;
+    directNeed.current=initialNeed;
+    setNeedId(initialNeed);setKind("goods");setAmount("1");setGift(undefined);setQr(undefined);setError("");
+    dialog.current?.showModal();
+    setDialogOpen(true);
+  },[initialNeed,campaign.status,needs]);
+  const pendingCode=dialogOpen && gift?.kind==="cash" && gift.status==="pending" ? gift.code : undefined;
+  useEffect(()=>{
+    if (!pendingCode) return;
+    const controller=new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function check() {
+      try {
+        const result=await api<{gift:Receipt}>({action:"lookup",code:pendingCode},controller.signal);
+        if (controller.signal.aborted) return;
+        if (result.gift.status==="confirmed") {
+          setGift(result.gift);
+          router.refresh();
+          return;
+        }
+      } catch {
+        // The donor can still confirm manually after a brief network failure.
+      }
+      if (!controller.signal.aborted) timer=setTimeout(check,3000);
+    }
+    timer=setTimeout(check,3000);
+    return ()=>{ controller.abort();clearTimeout(timer); };
+  },[pendingCode,router]);
   async function submit(event:FormEvent<HTMLFormElement>) {
     event.preventDefault();setBusy(true);setError("");
     const form=new FormData(event.currentTarget);
@@ -80,19 +147,15 @@ export function Give({campaign, needs, initialNeed}: {campaign:Pick<Campaign,"sl
     try { const r=await api<{receipt:Receipt}>({action:"confirm",code:gift.code});setGift(r.receipt);router.refresh(); }
     catch(err){setError(getError(err));}finally{setBusy(false);}
   }
-  return <>
-    <div className="give-actions">
-      <button className="button" disabled={campaign.status!=="active"} onClick={()=>open("cash")}><Heart size={18}/> Ủng hộ tiền</button>
-      <button className="button outline" disabled={campaign.status!=="active" || !availableNeeds.length} onClick={()=>open("goods")}><Package size={18}/> Góp hiện vật</button>
-      <Share path={`/chien-dich/${campaign.slug}`} title={campaign.title}/>
-    </div>
-    <dialog ref={dialog} className="dialog" aria-labelledby="give-title">
-      <div className="dialog-head"><h2 id="give-title">{gift?.status==="confirmed" || gift?.kind==="goods" ? "Cảm ơn bạn" : kind==="cash" ? "Ủng hộ bằng tiền" : "Đăng ký góp hiện vật"}</h2><button type="button" className="icon" onClick={()=>dialog.current?.close()} aria-label="Đóng"><X/></button></div>
+  return <GivingContext.Provider value={{campaign,available:availableNeeds,open}}>
+    {children}
+    <dialog ref={dialog} className="dialog" aria-labelledby={dialogTitle} onClose={()=>setDialogOpen(false)}>
+      <div className="dialog-head"><h2 id={dialogTitle} aria-live="polite">{gift?.status==="confirmed" || gift?.kind==="goods" ? "Cảm ơn bạn" : kind==="cash" ? "Ủng hộ bằng tiền" : "Đăng ký góp hiện vật"}</h2><button type="button" className="icon" onClick={()=>dialog.current?.close()} aria-label="Đóng"><X/></button></div>
       {gift ? <>
         <ReceiptView gift={gift}/>
         {gift.kind==="cash" && gift.status==="pending" ? <div className="qr">
           {qr && <img width="210" height="210" src={qr} alt="QR mở phiếu giao dịch mô phỏng"/>}
-          <p>QR này mở phiếu demo để xác nhận. Không dùng ứng dụng ngân hàng để chuyển tiền.</p>
+          <p>Quét QR để mở phiếu demo. Màn hình này tự cập nhật sau khi phiếu được xác nhận.</p>
           <button className="button" onClick={confirm} disabled={busy}>Xác nhận giao dịch demo</button>
         </div> : <div className="row"><Share path={`/chien-dich/${campaign.slug}`} title={campaign.title}/><button className="button" onClick={()=>dialog.current?.close()}><Check size={16}/> Hoàn tất</button></div>}
         <a href={`/tra-cuu?ma=${gift.code}`}>Mở trang tra cứu</a>
@@ -105,13 +168,13 @@ export function Give({campaign, needs, initialNeed}: {campaign:Pick<Campaign,"sl
           <label>Lời nhắn công khai (tùy chọn)<textarea name="note" maxLength={240}/></label>
         </> : <>
           <label>Hiện vật<select value={selected?.id} onChange={e=>setNeedId(Number(e.target.value))}>{availableNeeds.map(n=><option key={n.id} value={n.id}>{n.name}</option>)}</select></label>
-          {selected && <><label>Số lượng ({selected.unit})<input type="number" min={1} max={selected.target-selected.received-selected.pledged} value={amount} onChange={e=>setAmount(e.target.value)} required/></label><p>{selected.handoff}</p></>}
+          {selected && <><label>Số lượng ({selected.unit})<input type="number" min={1} max={selected.target-selected.received-selected.pledged} value={amount} onChange={e=>setAmount(e.target.value)} required/></label><p>Còn nhận hẹn {selected.target-selected.received-selected.pledged} {selected.unit}. {selected.handoff}</p></>}
         </>}
         <button className="button" disabled={busy || (kind==="goods" && !selected)}>{busy?"Đang xử lý…":kind==="cash"?"Tạo QR demo":"Đăng ký bàn giao"}</button>
       </form>}
       {error && <p className="error" role="alert">{error}</p>}
     </dialog>
-  </>;
+  </GivingContext.Provider>;
 }
 
 export function Lookup({initialCode}: {initialCode:string}) {
@@ -120,6 +183,16 @@ export function Lookup({initialCode}: {initialCode:string}) {
   const [error,setError]=useState("");
   const [status,setStatus]=useState("");
   const [busy,setBusy]=useState(false);
+  useEffect(()=>{
+    if (!/^[a-f0-9]{32}$/.test(initialCode)) return;
+    const controller=new AbortController();
+    setBusy(true);
+    api<{gift:Receipt}>({action:"lookup",code:initialCode},controller.signal)
+      .then(result=>{ if (!controller.signal.aborted) setGift(result.gift); })
+      .catch(err=>{ if (!controller.signal.aborted) setError(getError(err)); })
+      .finally(()=>{ if (!controller.signal.aborted) setBusy(false); });
+    return ()=>controller.abort();
+  },[initialCode]);
   async function process(confirm=false) {
     setBusy(true);setError("");setStatus("");
     if (!confirm) setGift(undefined);
@@ -130,7 +203,7 @@ export function Lookup({initialCode}: {initialCode:string}) {
       } else setGift((await api<{gift:Receipt}>({action:"lookup",code:code.trim().toLowerCase()})).gift);
     }catch(err){setError(getError(err));}finally{setBusy(false);}
   }
-  return <><form className="form" onSubmit={event=>{event.preventDefault();void process();}}><label>Mã tra cứu<input value={code} onChange={e=>setCode(e.target.value)} required autoComplete="off"/></label><button disabled={busy} className="button">Tra cứu</button></form>
+  return <><form className="form" onSubmit={event=>{event.preventDefault();void process();}}><label>Mã tra cứu<input value={code} onChange={e=>setCode(e.target.value)} required autoComplete="off" spellCheck={false}/></label><button disabled={busy} className="button">{busy?"Đang xử lý…":"Tra cứu"}</button></form>
     {gift && <><ReceiptView gift={gift}/>{gift.kind==="cash" && gift.status==="pending" && <button className="button" disabled={busy} onClick={()=>void process(true)}>Xác nhận giao dịch demo</button>}</>}
     {error && <p className="error" role="alert">{error}</p>}<p role="status">{status}</p></>;
 }
@@ -154,7 +227,7 @@ export function Matcher({titles}: {titles:Record<string,string>}) {
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     {result && <div className="ai-result" aria-live="polite">
-      {result.goods.map(item=><a key={item.id} href={`/chien-dich/${item.slug}?mon=${item.id}#gop`}><b>{item.name}</b><span>{titles[item.slug]} · có thể đăng ký thêm {item.available} {item.unit}</span></a>)}
+      {result.goods.map(item=><a key={item.id} href={`/chien-dich/${item.slug}?mon=${item.id}#gop`}><b>{item.name}</b><span>{titles[item.slug]} · có thể đăng ký thêm {item.available} {item.unit}</span><span className="ai-result-action">Đăng ký góp</span></a>)}
       {result.topics.some(t=>t.id==="money") && <a href="#chien-dich"><b>Ủng hộ bằng tiền</b><span>Chọn chiến dịch để tạo QR demo.</span></a>}
       {!result.goods.length && !result.topics.some(t=>t.id==="money") && <p>Chưa tìm được nhu cầu phù hợp. Bạn có thể <a href="#chien-dich">xem các chiến dịch</a> hoặc mô tả rõ tên món đồ.</p>}
     </div>}

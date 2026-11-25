@@ -10,6 +10,7 @@
     "dev": "next dev -H 127.0.0.1 -p 3100",
     "build": "next build",
     "start": "next start -p 3100",
+    "preview:clean": "node scripts/preview-clean.mjs",
     "check": "next typegen && tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test tests/*.test.ts"
   },
