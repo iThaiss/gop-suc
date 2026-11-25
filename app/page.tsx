@@ -35,7 +35,7 @@ export default async function Home({searchParams}: {searchParams:Promise<{nhom?:
       <div className="hero-copy">
         <span className="demo-label">Bản demo gây quỹ cộng đồng</span>
         <h1>Cùng góp sức<br/>cho <em>điều tử tế.</em></h1>
-        <p>Góp tiền hoặc hiện vật cho những việc cụ thể. Theo dõi từ lúc đóng góp đến khi bàn giao.</p>
+        <p>Góp tiền, hiện vật hoặc thời gian cho những việc cụ thể. Theo dõi từ lúc đóng góp đến khi bàn giao.</p>
         <div className="row"><a className="button" href="#chien-dich">Khám phá chiến dịch</a><a className="button outline" href="#tim-cach-gop">Tìm nơi cần đồ bạn có</a></div>
       </div>
       {featured && <Link href={"/chien-dich/" + featured.slug} className="masthead-story">

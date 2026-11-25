@@ -4,7 +4,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MapPin, Package } from "lucide-react";
 import { Give, GiveActions, GiveNeedButton, Share } from "../../../components/client";
-import { campaign, expenses, needs, publicGifts, updates } from "../../../lib/db";
+import { VolunteerShifts } from "../../../components/volunteer";
+import { campaign, expenses, needs, publicGifts, updates, volunteerShifts } from "../../../lib/db";
 import { money, picture, updateDate, updatePicture } from "../../../lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,7 @@ export default async function CampaignPage({params,searchParams}:Props) {
   if (!c || c.status==="draft") notFound();
   const {mon,soLuong}=await searchParams;
   const items=needs(c.slug), posts=updates(c.slug), bills=expenses(c.slug), gifts=publicGifts(c.slug);
+  const shifts=volunteerShifts(c.slug).filter(shift=>Date.parse(shift.startsAt)>Date.now());
   const percent=Math.min(100,Math.floor(c.received/c.goal*100));
   return <Give campaign={{slug:c.slug,title:c.title,status:c.status}} needs={items.map(item=>({...item}))}
     initialNeed={typeof mon==="string" && /^[1-9]\d{0,14}$/.test(mon) ? Number(mon) : undefined}
@@ -36,7 +38,7 @@ export default async function CampaignPage({params,searchParams}:Props) {
         <GiveActions/>
       </section>
     </div>
-    <nav className="detail-jumps" aria-label="Các mục của chiến dịch"><a href="#hien-vat">Hiện vật</a><a href="#nhat-ky">Nhật ký</a><a href="#thu-chi">Thu chi</a></nav>
+    <nav className="detail-jumps" aria-label="Các mục của chiến dịch"><a href="#hien-vat">Hiện vật</a>{shifts.length>0&&<a href="#tinh-nguyen">Tình nguyện</a>}<a href="#nhat-ky">Nhật ký</a><a href="#thu-chi">Thu chi</a></nav>
     <div className="detail-body">
       <div>
         <section className="panel" id="hien-vat"><h2>Hiện vật đang cần</h2>{items.map(n=><article key={n.id} className="need">
@@ -44,6 +46,7 @@ export default async function CampaignPage({params,searchParams}:Props) {
           <div className="need-details"><div><p><b>{n.received}/{n.target} {n.unit} đã nhận</b> · {n.pledged} {n.unit} đã hẹn · còn nhận hẹn {Math.max(0,n.target-n.received-n.pledged)} {n.unit}</p><small>{n.handoff}</small></div>
             <GiveNeedButton id={n.id} name={n.name}/></div>
         </article>)}{!items.length && <p>Chiến dịch chưa công bố nhu cầu hiện vật.</p>}</section>
+        {shifts.length>0 && <VolunteerShifts items={shifts.map(shift=>({...shift}))} open={c.status==="active"}/>}
         <section className="panel" id="nhat-ky"><h2>Nhật ký và ảnh bàn giao</h2>{posts.length>0 ? <ol className="post-timeline">{posts.map(post=>{
           const photo=updatePicture(post);
           const path=`/chien-dich/${c.slug}/cap-nhat/${post.id}`;

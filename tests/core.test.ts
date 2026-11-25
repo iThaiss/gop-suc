@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import sharp from "sharp";
-import { campaign, confirmCash, contribute, manage, needs, publicGifts, publicUpdatePhoto, receipt, updates } from "../lib/db.ts";
+import { bookVolunteer, campaign, cancelVolunteer, confirmCash, contribute, manage, needs, publicGifts, publicUpdatePhoto, receipt, updates, volunteerBooking, volunteerShifts } from "../lib/db.ts";
 import { classify, findMatches } from "../lib/match.ts";
 import { encodeUpdateImage } from "../lib/update-image.ts";
 
@@ -91,4 +91,20 @@ test("Ảnh cập nhật được nén, bỏ metadata và chỉ công khai sau k
   manage("admin","thu-anh","publish",{});
   assert.deepEqual(Buffer.from(publicUpdatePhoto("thu-anh",post.id)!),photo);
   assert.equal(publicUpdatePhoto(slug,post.id),undefined);
+});
+
+test("giữ chỗ tình nguyện không vượt sức chứa và hủy để mở lại chỗ", () => {
+  const local=new Date(Date.now()+48*3600_000).toISOString().slice(0,16);
+  const fields={title:"Soạn hàng",location:"Điểm demo",startLocal:local,capacity:1};
+  manage("organizer",slug,"addShift",fields);
+  const shift=volunteerShifts(slug).find(item=>item.title===fields.title)!;
+  assert.equal(shift.startsAt,new Date(local+":00+07:00").toISOString());
+  const booking=bookVolunteer(slug,shift.id);
+  assert.equal(volunteerBooking(booking.code)?.status,"booked");
+  assert.throws(()=>bookVolunteer(slug,shift.id),/đủ người/);
+  assert.throws(()=>bookVolunteer("bep-am-cuoi-tuan",shift.id),/không còn mở/);
+  assert.equal(cancelVolunteer(booking.code).status,"cancelled");
+  assert.equal(cancelVolunteer(booking.code).status,"cancelled");
+  assert.equal(bookVolunteer(slug,shift.id).status,"booked");
+  assert.throws(()=>manage("organizer",slug,"addShift",{...fields,startLocal:"2025-02-30T12:00"}),/tương lai/);
 });

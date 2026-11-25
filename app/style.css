@@ -206,6 +206,14 @@ footer{border-top:1px solid var(--line)}
 .post h3 a:hover{text-decoration:underline}
 .post p,.post-page p{white-space:pre-wrap}
 .post-page h1{margin-top:6px}
+.volunteer-list{display:grid;gap:10px}
+.shift-card{border:1px solid var(--line);border-radius:12px;padding:14px}
+.shift-card p{display:flex;align-items:center;gap:8px}
+.shift-card svg{flex-shrink:0;color:var(--forest)}
+.shift-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}
+.shift-actions span{font-weight:750;color:var(--forest)}
+.cancel-booking summary{cursor:pointer;font-weight:750;color:var(--forest)}
+.cancel-booking p{margin:8px 0}
 .need>div.need-details{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
 .receipt-copy{display:inline-flex;align-items:center;gap:6px;justify-self:start;min-height:36px;padding:6px 9px;border:1px solid #8ba48d;border-radius:8px;background:var(--white);color:var(--forest);font-weight:700}
 .ai-result-action{margin-top:4px;font-weight:750;text-decoration:underline}

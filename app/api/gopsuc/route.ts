@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { categories, covers } from "../../../lib/domain";
-import { campaign, confirmCash, contribute, db, manage, needs, receipt, RuleError } from "../../../lib/db";
+import { bookVolunteer, campaign, cancelVolunteer, confirmCash, contribute, db, manage, needs, receipt, RuleError, volunteerBooking } from "../../../lib/db";
 import { findMatches, topics } from "../../../lib/match";
 import { hash, sessionCookie as cookie, sessionRole } from "../../../lib/session";
 import { encodeUpdateImage, readPhotoForm, UploadError } from "../../../lib/update-image";
@@ -21,6 +21,8 @@ const schema = z.discriminatedUnion("action",[
   z.object({action:z.literal("contribute"), slug, kind:z.enum(["cash","goods"]), amount, needId:z.number().int().positive().optional(), anonymous:z.boolean(), name:z.string().trim().max(60).optional(), note:z.string().trim().max(240).optional()}),
   z.object({action:z.literal("confirm"),code}),
   z.object({action:z.literal("lookup"),code}),
+  z.object({action:z.literal("bookVolunteer"),slug,shiftId:z.number().int().positive()}),
+  z.object({action:z.literal("cancelVolunteer"),code}),
   z.object({action:z.literal("match"),query:string(220)}),
   z.object({action:z.literal("login"),role:z.enum(["admin","organizer"]),password:string(200)}),
   z.object({action:z.literal("logout")}),
@@ -28,6 +30,7 @@ const schema = z.discriminatedUnion("action",[
   z.object({action:z.literal("editDraft"),...manageCommon,...campaignFields}),
   z.object({action:z.literal("publish"),...manageCommon}),
   z.object({action:z.literal("close"),...manageCommon}),
+  z.object({action:z.literal("addShift"),slug,title:string(100),location:string(120),startLocal:z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),capacity:z.number().int().min(1).max(1000)}),
   z.object({action:z.literal("need"),...manageCommon,name:string(100),unit:string(30),target:z.number().int().min(1).max(100_000),handoff:string(180),topic:z.enum(topics.map(t=>t.id).filter(id=>id!=="money"))}),
   updateSchema,
   z.object({action:z.literal("expense"),...manageCommon,title:string(100),amount,evidence:string(400)}),
@@ -45,7 +48,7 @@ function rateLimit(request: NextRequest, action: string) {
     ON CONFLICT(key) DO UPDATE SET count=CASE WHEN until<? THEN 1 ELSE count+1 END,
     until=CASE WHEN until<? THEN excluded.until ELSE until END RETURNING count
   `).get(key,now + 60_000,now,now);
-  return Number(row?.count) <= (action === "login" ? 8 : action === "update-photo" ? 12 : action === "contribute" ? 20 : 60);
+  return Number(row?.count) <= (action === "login" ? 8 : action === "bookVolunteer" ? 10 : action === "update-photo" ? 12 : action === "contribute" ? 20 : 60);
 }
 
 export async function POST(request: NextRequest) {
@@ -98,8 +101,12 @@ export async function POST(request: NextRequest) {
       case "confirm": return json(confirmCash(input.code));
       case "lookup": {
         const gift=receipt(input.code);
-        return gift ? json({gift}) : json({error:"Không tìm thấy mã tra cứu."},404);
+        if (gift) return json({gift});
+        const booking=volunteerBooking(input.code);
+        return booking ? json({booking}) : json({error:"Không tìm thấy mã tra cứu."},404);
       }
+      case "bookVolunteer": return json({booking:bookVolunteer(input.slug,input.shiftId)},201);
+      case "cancelVolunteer": return json({booking:cancelVolunteer(input.code)});
       case "match": return json(findMatches(input.query,needs()));
       case "login": {
         const configured = input.role==="admin" ? process.env.ADMIN_PASSWORD : process.env.ORGANIZER_PASSWORD;

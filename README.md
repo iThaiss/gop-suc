@@ -24,6 +24,7 @@ SQLite tạo dữ liệu mẫu ở `.data/gopsuc.sqlite` trong lần chạy đ�
 | Giao diện và chia sẻ | `app/chien-dich`, `components/client.tsx` | Trang chiến dịch và cập nhật có URL riêng, ảnh Open Graph; hộp chia sẻ có nút Facebook, sao chép và menu chia sẻ nếu thiết bị hỗ trợ. |
 | Tiền và hiện vật | `app/api/gopsuc/route.ts`, `lib/db.ts` | Kiểm tra đầu vào ở máy chủ, cập nhật trong giao dịch SQLite, xác nhận tiền lặp chỉ cộng một lần. Lịch hẹn giữ chỗ hiện vật và ghi số thực nhận riêng. |
 | Quản trị và thu chi | `app/quan-tri`, `lib/session.ts` | Máy chủ kiểm tra vai trò trước thao tác. Chỉ quản trị viên có thể duyệt, đóng và ghi khoản chi. Các khoản chi vượt số dư bị từ chối. |
+| Ca tình nguyện | `components/volunteer.tsx`, `lib/db.ts` | Người tổ chức đặt giờ Việt Nam và giới hạn số chỗ. Mỗi lần đăng ký cấp mã riêng để tra cứu hoặc trả chỗ trước giờ bắt đầu. Hệ thống kiểm tra sức chứa trong cùng giao dịch với việc giữ chỗ. |
 | Ảnh bàn giao | `lib/update-image.ts`, `app/api/gopsuc/photos` | Người tổ chức có thể thêm một ảnh JPEG, PNG hoặc WebP vào bài cập nhật. Máy chủ giới hạn 4 MB, nén thành WebP tối đa 1280 px, loại metadata rồi lưu cùng bài. Ảnh của chiến dịch chờ duyệt chưa có URL truy cập công khai. |
 | AI tìm cách góp | `lib/match.ts` | Phân loại gần nhất từ các câu tiếng Việt gắn nhãn. Chuẩn hóa dấu, dùng đặc trưng từ/cặp từ và tính độ tương đồng cosine. Sau khi nhận dạng loại hiện vật, lấy số lượng và lịch còn mở từ SQLite. Nếu câu có một số lượng rõ ràng và cùng đơn vị, biểu mẫu điền sẵn tối đa số còn nhận. |
 

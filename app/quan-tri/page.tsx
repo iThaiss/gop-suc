@@ -2,8 +2,8 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { ClipboardCheck, HandHeart, Package, Plus, Wallet } from "lucide-react";
 import { ActionForm } from "../../components/admin";
-import { campaigns, expenses, GOODS_PAGE_SIZE, needs, pendingCounts, pendingGoods, updates } from "../../lib/db";
-import { categories, covers, money, type Campaign } from "../../lib/domain";
+import { campaigns, expenses, GOODS_PAGE_SIZE, needs, pendingCounts, pendingGoods, updates, volunteerShifts } from "../../lib/db";
+import { categories, covers, money, vietnamTime, type Campaign } from "../../lib/domain";
 import { topics } from "../../lib/match";
 import { sessionCookie, sessionRole } from "../../lib/session";
 
@@ -11,7 +11,7 @@ export const metadata={title:"Quản trị"};
 export const dynamic="force-dynamic";
 
 const status={draft:"Chờ duyệt",active:"Đang nhận",closed:"Đã đóng"};
-const tabs={overview:"Tổng quan",handoff:"Bàn giao",journal:"Nhật ký & thu chi"} as const;
+const tabs={overview:"Tổng quan",handoff:"Bàn giao",volunteer:"Tình nguyện",journal:"Nhật ký & thu chi"} as const;
 type Tab=keyof typeof tabs;
 
 function adminPath(slug: string, tab: Tab = "overview", page = 1) {
@@ -58,6 +58,7 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
   const items=selected && tab==="overview" ? needs(selected.slug) : [];
   const posts=selected && tab==="journal" ? updates(selected.slug) : [];
   const bills=selected && tab==="journal" ? expenses(selected.slug) : [];
+  const shifts=selected && tab==="volunteer" ? volunteerShifts(selected.slug) : [];
 
   return <div className="shell admin">
     <div className="section-head"><div><h1>Quản trị chiến dịch</h1><p>{role==="admin"?"Quản trị viên":"Người tổ chức"}</p></div><ActionForm action="logout" label="Đăng xuất" tone="secondary"/></div>
@@ -108,6 +109,19 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
           {pages>1&&<nav className="filters admin-pages" aria-label="Các trang phiếu bàn giao">
             {page>1&&<Link href={adminPath(selected.slug,tab,page-1)}>Trang trước</Link>} <span>Trang {page}/{pages}</span> {page<pages&&<Link href={adminPath(selected.slug,tab,page+1)}>Trang sau</Link>}
           </nav>}
+        </>}
+        {tab==="volunteer" && <>
+          <h3>Ca tình nguyện</h3>
+          {shifts.length ? <ul className="admin-need-list">{shifts.map(shift=><li key={shift.id}>
+            <div><b>{shift.title}</b><p>{vietnamTime(shift.startsAt)} · {shift.location}</p></div>
+            <span>{shift.reserved}/{shift.capacity} đã giữ chỗ</span>
+          </li>)}</ul> : <p>Chưa có ca tình nguyện.</p>}
+          {selected.status!=="closed" && <details className="admin-disclosure"><summary><Plus size={18}/> Tạo ca</summary>
+            <ActionForm action="addShift" slug={selected.slug} label="Lưu ca tình nguyện" numeric={["capacity"]}>
+              <label>Tên công việc<input name="title" maxLength={100} required/></label><label>Điểm tập trung<input name="location" maxLength={120} required/></label>
+              <div className="admin-fields"><label>Bắt đầu (giờ Việt Nam)<input type="datetime-local" name="startLocal" required/></label><label>Số chỗ<input type="number" name="capacity" min="1" max="1000" required/></label></div>
+            </ActionForm>
+          </details>}
         </>}
         {tab==="journal" && <>
           <h3>Nhật ký</h3>{posts.length ? <ul className="admin-need-list">{posts.map(post=><li key={post.id}><b>{post.title}</b><span>{post.created.slice(0,10)}</span></li>)}</ul> : <p>Chưa có bài cập nhật.</p>}

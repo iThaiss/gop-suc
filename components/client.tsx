@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useId, useRef, useState, type For
 import { useRouter } from "next/navigation";
 import { Check, Copy, Heart, Package, Share2, Sparkles, X } from "lucide-react";
 import { FacebookShareButton } from "react-share";
-import { money, type Campaign, type Need, type Receipt } from "../lib/domain";
+import { money, vietnamTime, type Campaign, type Need, type Receipt, type VolunteerBooking } from "../lib/domain";
 import type { MatchResult } from "../lib/match";
 
 export async function api<T>(data: object | FormData, signal?: AbortSignal): Promise<T> {
@@ -188,31 +188,46 @@ export function Give({campaign, needs, initialNeed, initialAmount, children}: {c
 export function Lookup({initialCode}: {initialCode:string}) {
   const [code,setCode]=useState(initialCode);
   const [gift,setGift]=useState<Receipt>();
+  const [booking,setBooking]=useState<VolunteerBooking>();
   const [error,setError]=useState("");
   const [status,setStatus]=useState("");
   const [busy,setBusy]=useState(false);
+  type LookupResult = {gift?:Receipt;booking?:VolunteerBooking};
   useEffect(()=>{
     if (!/^[a-f0-9]{32}$/.test(initialCode)) return;
     const controller=new AbortController();
     setBusy(true);
-    api<{gift:Receipt}>({action:"lookup",code:initialCode},controller.signal)
-      .then(result=>{ if (!controller.signal.aborted) setGift(result.gift); })
+    api<LookupResult>({action:"lookup",code:initialCode},controller.signal)
+      .then(result=>{ if (!controller.signal.aborted) {setGift(result.gift);setBooking(result.booking);} })
       .catch(err=>{ if (!controller.signal.aborted) setError(getError(err)); })
       .finally(()=>{ if (!controller.signal.aborted) setBusy(false); });
     return ()=>controller.abort();
   },[initialCode]);
   async function process(confirm=false) {
     setBusy(true);setError("");setStatus("");
-    if (!confirm) setGift(undefined);
+    if (!confirm) {setGift(undefined);setBooking(undefined);}
     try {
       if (confirm && gift) {
         const r=await api<{receipt:Receipt;duplicate:boolean}>({action:"confirm",code:gift.code});
         setGift(r.receipt);setStatus(r.duplicate?"Giao dịch đã được ghi nhận trước đó.":"Đã ghi nhận khoản ủng hộ demo.");
-      } else setGift((await api<{gift:Receipt}>({action:"lookup",code:code.trim().toLowerCase()})).gift);
+      } else {
+        const result=await api<LookupResult>({action:"lookup",code:code.trim().toLowerCase()});
+        setGift(result.gift);setBooking(result.booking);
+      }
     }catch(err){setError(getError(err));}finally{setBusy(false);}
   }
   return <><form className="form" onSubmit={event=>{event.preventDefault();void process();}}><label>Mã tra cứu<input value={code} onChange={e=>setCode(e.target.value)} required autoComplete="off" spellCheck={false}/></label><button disabled={busy} className="button">{busy?"Đang xử lý…":"Tra cứu"}</button></form>
     {gift && <><ReceiptView gift={gift}/>{gift.kind==="cash" && gift.status==="pending" && <button className="button" disabled={busy} onClick={()=>void process(true)}>Xác nhận giao dịch demo</button>}</>}
+    {booking && <><div className="ticket"><strong>{booking.title}</strong><span>{vietnamTime(booking.startsAt)} · {booking.location}</span><span>{booking.status==="booked"?"Đã giữ 1 chỗ":"Đã hủy giữ chỗ"}</span></div>
+      <a href={`/chien-dich/${booking.slug}#tinh-nguyen`}>Xem ca trên trang chiến dịch</a>
+      {booking.status==="booked" && Date.parse(booking.startsAt)>Date.now() && <details className="cancel-booking"><summary>Hủy giữ chỗ</summary><p>Chỗ này sẽ được mở lại cho người khác.</p><button type="button" className="button outline" disabled={busy} onClick={async()=>{
+        setBusy(true);setError("");setStatus("");
+        try {
+          const result=await api<{booking:VolunteerBooking}>({action:"cancelVolunteer",code:booking.code});
+          setBooking(result.booking);setStatus("Đã hủy giữ chỗ.");
+        } catch(err) {setError(getError(err));} finally {setBusy(false);}
+      }}>Xác nhận hủy</button></details>}
+    </>}
     {error && <p className="error" role="alert">{error}</p>}<p role="status">{status}</p></>;
 }
 

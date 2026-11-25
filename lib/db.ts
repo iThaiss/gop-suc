@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import type { Campaign, Need, Update, Expense, Receipt, Role } from "./domain.ts";
+import type { Campaign, Need, Update, Expense, Receipt, Role, VolunteerShift, VolunteerBooking } from "./domain.ts";
 
 let connection: DatabaseSync | undefined;
 const campaignFields = `c.*, COALESCE((SELECT SUM(amount) FROM receipts WHERE slug=c.slug
@@ -43,6 +43,13 @@ export function db() {
       body TEXT NOT NULL, image TEXT NOT NULL DEFAULT '', created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS update_photos(
       updateId INTEGER PRIMARY KEY REFERENCES updates(id) ON DELETE CASCADE, image BLOB NOT NULL);
+    CREATE TABLE IF NOT EXISTS volunteer_shifts(
+      id INTEGER PRIMARY KEY, slug TEXT NOT NULL REFERENCES campaigns(slug), title TEXT NOT NULL,
+      location TEXT NOT NULL, startsAt TEXT NOT NULL, capacity INTEGER NOT NULL CHECK(capacity > 0));
+    CREATE TABLE IF NOT EXISTS volunteer_bookings(
+      code TEXT PRIMARY KEY, shiftId INTEGER NOT NULL REFERENCES volunteer_shifts(id),
+      status TEXT NOT NULL CHECK(status IN ('booked','cancelled')));
+    CREATE INDEX IF NOT EXISTS volunteer_bookings_shift ON volunteer_bookings(shiftId,status);
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, role TEXT NOT NULL, until INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY);
@@ -50,6 +57,12 @@ export function db() {
   database.exec("BEGIN IMMEDIATE");
   try {
     if (database.prepare("INSERT OR IGNORE INTO metadata VALUES('seed-v1')").run().changes) seed(database);
+    if (database.prepare("INSERT OR IGNORE INTO metadata VALUES('volunteer-demo-v1')").run().changes) {
+      const start = new Date(Date.now()+7*24*3600_000);
+      start.setUTCHours(2,0,0,0);
+      database.prepare("INSERT INTO volunteer_shifts(slug,title,location,startsAt,capacity) SELECT slug,?,?,?,? FROM campaigns WHERE slug='lop-hoc-sau-mua'")
+        .run("Đóng gói đồ dùng học tập","Điểm nhận demo A",start.toISOString(),8);
+    }
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");
@@ -97,6 +110,14 @@ export const receipt = (code: string) => db().prepare(`SELECT ${receiptFields} F
 export const GOODS_PAGE_SIZE = 15;
 export const pendingGoods = (slug: string, offset = 0) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.slug=? AND r.status='pending' AND r.kind='goods' ORDER BY r.rowid DESC LIMIT ? OFFSET ?`).all(slug, GOODS_PAGE_SIZE, offset) as unknown as Receipt[];
 export const pendingCounts = () => new Map(db().prepare("SELECT slug, COUNT(*) AS count FROM receipts WHERE kind='goods' AND status='pending' GROUP BY slug").all().map(row => [String(row.slug), Number(row.count)]));
+export const volunteerShifts = (slug: string) => db().prepare(`
+  SELECT s.*, (SELECT COUNT(*) FROM volunteer_bookings b WHERE b.shiftId=s.id AND b.status='booked') AS reserved
+  FROM volunteer_shifts s WHERE s.slug=? ORDER BY s.startsAt,s.id
+`).all(slug) as unknown as VolunteerShift[];
+export const volunteerBooking = (code: string) => db().prepare(`
+  SELECT b.code,s.slug,s.title,s.location,s.startsAt,b.status
+  FROM volunteer_bookings b JOIN volunteer_shifts s ON s.id=b.shiftId WHERE b.code=?
+`).get(code) as VolunteerBooking | undefined;
 
 export class RuleError extends Error {}
 
@@ -137,6 +158,29 @@ export function confirmCash(code: string) {
   });
 }
 
+export function bookVolunteer(slug: string, id: number) {
+  return transaction(d=>{
+    if (campaign(slug)?.status!=="active") throw new RuleError("Chiến dịch đã ngừng nhận đăng ký.");
+    const shift=volunteerShifts(slug).find(row=>row.id===id);
+    if (!shift || Date.parse(shift.startsAt)<=Date.now()) throw new RuleError("Ca này đã qua hoặc không còn mở.");
+    if (shift.reserved>=shift.capacity) throw new RuleError("Ca này đã đủ người.");
+    const code=randomBytes(16).toString("hex");
+    d.prepare("INSERT INTO volunteer_bookings VALUES(?,?,'booked')").run(code,id);
+    return volunteerBooking(code)!;
+  });
+}
+
+export function cancelVolunteer(code: string) {
+  return transaction(d=>{
+    const booking=volunteerBooking(code);
+    if (!booking) throw new RuleError("Không tìm thấy phiếu tình nguyện.");
+    if (booking.status==="cancelled") return booking;
+    if (Date.parse(booking.startsAt)<=Date.now()) throw new RuleError("Ca đã bắt đầu và không thể hủy.");
+    d.prepare("UPDATE volunteer_bookings SET status='cancelled' WHERE code=?").run(code);
+    return volunteerBooking(code)!;
+  });
+}
+
 export function manage(role: Role, slug: string, action: string, input: Record<string, string | number>, photo?: Uint8Array) {
   return transaction((d) => {
     const c = campaign(slug);
@@ -154,6 +198,12 @@ export function manage(role: Role, slug: string, action: string, input: Record<s
       if (role !== "admin") throw new RuleError("Cần quyền quản trị.");
       if ((action === "publish" && c.status !== "draft") || (action === "close" && c.status !== "active")) throw new RuleError("Trạng thái hiện tại không cho phép thao tác này.");
       d.prepare("UPDATE campaigns SET status=? WHERE slug=?").run(action === "publish" ? "active" : "closed",slug);
+    } else if (action==="addShift") {
+      const date=String(input.startLocal);
+      const start=new Date(date+":00+07:00");
+      const local=Number.isFinite(start.getTime()) ? new Date(start.getTime()+7*3600_000).toISOString().slice(0,16) : "";
+      if (c.status==="closed" || local!==date || start.getTime()<=Date.now()) throw new RuleError("Chọn thời gian ca trong tương lai.");
+      d.prepare("INSERT INTO volunteer_shifts(slug,title,location,startsAt,capacity) VALUES(?,?,?,?,?)").run(slug,input.title,input.location,start.toISOString(),input.capacity);
     } else if (action === "need") {
       if (c.status === "closed") throw new RuleError("Chiến dịch đã đóng.");
       d.prepare("INSERT INTO needs(slug,name,unit,target,handoff,topic) VALUES(?,?,?,?,?,?)").run(slug,input.name,input.unit,input.target,input.handoff,input.topic);

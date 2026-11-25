@@ -17,6 +17,11 @@ export type Receipt = {
   status: "pending" | "confirmed" | "cancelled"; actual: number | null;
   needId: number | null; needName: string | null; unit: string | null; handoff: string | null;
 };
+export type VolunteerShift = {id:number;slug:string;title:string;location:string;startsAt:string;capacity:number;reserved:number};
+export type VolunteerBooking = {code:string;slug:string;title:string;location:string;startsAt:string;status:"booked"|"cancelled"};
+export function vietnamTime(iso: string) {
+  return new Intl.DateTimeFormat("vi-VN",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Ho_Chi_Minh"}).format(new Date(iso));
+}
 export const money = (n: number) => new Intl.NumberFormat("vi-VN", {style:"currency",currency:"VND"}).format(n);
 export const picture = (cover: string) => covers.includes(cover as typeof covers[number]) ? `/photos/${cover}.webp` : "/photos/school.webp";
 export const updatePicture = (post: Update) => post.hasPhoto ? `/api/gopsuc/photos/${post.slug}/${post.id}` : post.image ? picture(post.image) : undefined;
