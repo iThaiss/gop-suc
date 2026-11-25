@@ -12,7 +12,8 @@
     "start": "next start -p 3100",
     "preview:clean": "node scripts/preview-clean.mjs",
     "check": "next typegen && tsc --noEmit",
-    "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test tests/*.test.ts",
+    "test:api": "node --test tests/admin-api.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",

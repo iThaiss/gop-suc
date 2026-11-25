@@ -2,10 +2,12 @@
 
 import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Heart, Package, Share2, Sparkles, X } from "lucide-react";
+import { Copy, Heart, Package, Share2, X } from "lucide-react";
 import { FacebookShareButton } from "react-share";
-import { money, vietnamTime, type Campaign, type Need, type Receipt, type VolunteerBooking } from "../lib/domain";
-import type { MatchResult } from "../lib/match";
+import { money, vietnamTime, type Campaign, type CampaignImpact, type Need, type Receipt, type VolunteerBooking } from "../lib/domain";
+import { receiptAccessFromFragment, receiptPath } from "../lib/receipt-access";
+import { ReceiptImpact } from "./receipt-impact";
+import { PrivateReceiptLink } from "./private-receipt-link";
 
 export async function api<T>(data: object | FormData, signal?: AbortSignal): Promise<T> {
   const result = await fetch("/api/gopsuc",{
@@ -50,7 +52,9 @@ function ReceiptView({ gift }: {gift:Receipt}) {
   const [copyMessage,setCopyMessage]=useState("");
   return <div className="ticket"><strong>{gift.kind==="cash" ? money(gift.amount) : `${gift.amount} ${gift.unit} · ${gift.needName}`}</strong>
     <span>{gift.status==="confirmed" ? gift.kind==="goods" ? `Đã nhận ${gift.actual} ${gift.unit}` : "Đã ghi nhận khoản ủng hộ" : gift.status==="cancelled" ? "Đã hủy hẹn" : gift.kind==="cash" ? "Đang chờ xác nhận" : "Đã đăng ký · chờ bàn giao"}</span>
-    {gift.handoff && <span>{gift.handoff}</span>}
+    {gift.kind==="goods" && gift.status==="confirmed" && gift.actual!==null && gift.actual<gift.amount &&
+      <small>Đã hẹn {gift.amount} {gift.unit} · Chênh lệch {gift.amount-gift.actual} {gift.unit} không được tính là đã nhận.</small>}
+    {gift.status==="pending" && gift.handoff && <span>{gift.handoff}</span>}
     <label>Mã tra cứu<input value={gift.code} readOnly onFocus={event=>event.currentTarget.select()}/></label>
     <button type="button" className="receipt-copy" onClick={async()=>{
       try { await navigator.clipboard.writeText(gift.code);setCopyMessage("Đã sao chép mã tra cứu."); }
@@ -84,7 +88,7 @@ export function GiveNeedButton({id,name}: {id:number;name:string}) {
   return <button type="button" className="button outline" aria-label={`Góp ${name.toLocaleLowerCase("vi")}`} onClick={()=>controls.open("goods",id)}>Góp món này</button>;
 }
 
-export function Give({campaign, needs, initialNeed, initialAmount, children}: {campaign:GivingControls["campaign"];needs:Need[];initialNeed?:number;initialAmount?:number;children:ReactNode}) {
+export function Give({campaign, needs, initialNeed, initialAmount, initialCash, children}: {campaign:GivingControls["campaign"];needs:Need[];initialNeed?:number;initialAmount?:number;initialCash?:number|null;children:ReactNode}) {
   const dialog=useRef<HTMLDialogElement>(null);
   const dialogTitle=useId();
   const router=useRouter();
@@ -94,6 +98,7 @@ export function Give({campaign, needs, initialNeed, initialAmount, children}: {c
   const [anonymous,setAnonymous]=useState(true);
   const [gift,setGift]=useState<Receipt>();
   const [qr,setQr]=useState<string>();
+  const [actionToken,setActionToken]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [dialogOpen,setDialogOpen]=useState(false);
@@ -102,23 +107,30 @@ export function Give({campaign, needs, initialNeed, initialAmount, children}: {c
   const open=(next:"cash"|"goods", itemId?:number)=>{
     if (busy) return;
     if (itemId) setNeedId(itemId);
-    setKind(next);setGift(undefined);setQr(undefined);setError("");setAmount(next==="cash"?"50000":"1");
+    setKind(next);setGift(undefined);setQr(undefined);setActionToken(null);setError("");setAmount(next==="cash"?"50000":"1");
     dialog.current?.showModal();
     setDialogOpen(true);
   };
   const directNeed=useRef<string | undefined>(undefined);
+  const directCash=useRef<number|null|undefined>(undefined);
+  useEffect(()=>{
+    if(initialCash===undefined||initialCash===directCash.current||campaign.status!=="active") return;
+    directCash.current=initialCash;
+    setKind("cash");setAmount(String(initialCash??50_000));setGift(undefined);setQr(undefined);setActionToken(null);setError("");
+    dialog.current?.showModal();setDialogOpen(true);
+  },[initialCash,campaign.status]);
   useEffect(()=>{
     const key=[initialNeed,initialAmount].join(":");
-    if (!initialNeed || directNeed.current===key || campaign.status!=="active") return;
+    if (initialCash!==undefined || !initialNeed || directNeed.current===key || campaign.status!=="active") return;
     const item=needs.find(item=>item.id===initialNeed);
     if (!item) return;
     const remaining=item.target-item.received-item.pledged;
     if (remaining<=0) return;
     directNeed.current=key;
-    setNeedId(initialNeed);setKind("goods");setAmount(String(Math.min(initialAmount??1,remaining)));setGift(undefined);setQr(undefined);setError("");
+    setNeedId(initialNeed);setKind("goods");setAmount(String(Math.min(initialAmount??1,remaining)));setGift(undefined);setQr(undefined);setActionToken(null);setError("");
     dialog.current?.showModal();
     setDialogOpen(true);
-  },[initialNeed,initialAmount,campaign.status,needs]);
+  },[initialNeed,initialAmount,initialCash,campaign.status,needs]);
   const pendingCode=dialogOpen && gift?.kind==="cash" && gift.status==="pending" ? gift.code : undefined;
   useEffect(()=>{
     if (!pendingCode) return;
@@ -145,14 +157,14 @@ export function Give({campaign, needs, initialNeed, initialAmount, children}: {c
     event.preventDefault();setBusy(true);setError("");
     const form=new FormData(event.currentTarget);
     try {
-      const result=await api<{gift:Receipt;qr?:string}>({action:"contribute",slug:campaign.slug,kind,amount:Number(amount),needId:kind==="goods"?selected?.id:undefined,anonymous,name:form.get("name")??undefined,note:form.get("note")??undefined});
-      setGift(result.gift);setQr(result.qr);router.refresh();
+      const result=await api<{gift:Receipt;qr:string|null;actionToken:string|null}>({action:"contribute",slug:campaign.slug,kind,amount:Number(amount),needId:kind==="goods"?selected?.id:undefined,anonymous,name:form.get("name")??undefined,note:form.get("note")??undefined});
+      setGift(result.gift);setQr(result.qr??undefined);setActionToken(result.actionToken);router.refresh();
     } catch (err) {setError(getError(err));} finally {setBusy(false);}
   }
   async function confirm() {
-    if (!gift) return;
+    if (!gift || !actionToken) return;
     setBusy(true);setError("");
-    try { const r=await api<{receipt:Receipt}>({action:"confirm",code:gift.code});setGift(r.receipt);router.refresh(); }
+    try { const r=await api<{receipt:Receipt}>({action:"confirm",code:gift.code,actionToken});setGift(r.receipt);router.refresh(); }
     catch(err){setError(getError(err));}finally{setBusy(false);}
   }
   return <GivingContext.Provider value={{campaign,available:availableNeeds,open}}>
@@ -163,10 +175,10 @@ export function Give({campaign, needs, initialNeed, initialAmount, children}: {c
         <ReceiptView gift={gift}/>
         {gift.kind==="cash" && gift.status==="pending" ? <div className="qr">
           {qr && <img width="210" height="210" src={qr} alt="QR mở phiếu giao dịch mô phỏng"/>}
-          <p>Quét QR để mở phiếu demo. Màn hình này tự cập nhật sau khi phiếu được xác nhận.</p>
-          <button className="button" onClick={confirm} disabled={busy}>Xác nhận giao dịch demo</button>
-        </div> : <div className="row"><Share path={`/chien-dich/${campaign.slug}`} title={campaign.title}/><button className="button" onClick={()=>dialog.current?.close()}><Check size={16}/> Hoàn tất</button></div>}
-        <a href={`/tra-cuu?ma=${gift.code}`}>Mở trang tra cứu</a>
+          <p>Quét QR riêng để xác nhận phiếu demo trên thiết bị khác. Màn hình này sẽ tự cập nhật.</p>
+          <button className="button" onClick={confirm} disabled={busy||!actionToken}>Xác nhận giao dịch demo</button>
+          {actionToken&&<PrivateReceiptLink code={gift.code} actionToken={actionToken} label="Mở phiếu để xác nhận"/>}
+        </div> : <div className="row"><a className="button" href={`/tra-cuu?ma=${gift.code}`}>Mở phiếu và theo dõi</a><Share path={`/chien-dich/${campaign.slug}`} title={campaign.title}/></div>}
       </> : <form className="form" onSubmit={submit}>
         {kind==="cash" ? <>
           <div className="quick">{[20000,50000,100000,200000,500000].map(n=><button key={n} type="button" aria-pressed={Number(amount)===n} onClick={()=>setAmount(String(n))}>{n/1000}k</button>)}</div>
@@ -189,80 +201,75 @@ export function Lookup({initialCode}: {initialCode:string}) {
   const [code,setCode]=useState(initialCode);
   const [gift,setGift]=useState<Receipt>();
   const [booking,setBooking]=useState<VolunteerBooking>();
+  const [impact,setImpact]=useState<CampaignImpact | null>();
   const [error,setError]=useState("");
   const [status,setStatus]=useState("");
   const [busy,setBusy]=useState(false);
-  type LookupResult = {gift?:Receipt;booking?:VolunteerBooking};
+  const [access,setAccess]=useState<{code:string;token:string}>();
+  const lastLinkAccess=useRef<{code:string;token:string}|null>(null);
+  type LookupResult = {gift?:Receipt;booking?:VolunteerBooking;impact:CampaignImpact | null};
   useEffect(()=>{
     if (!/^[a-f0-9]{32}$/.test(initialCode)) return;
+    const fragment=window.location.hash;
+    const token=receiptAccessFromFragment(fragment);
+    if (token) {
+      const current={code:initialCode,token};
+      lastLinkAccess.current=current;
+      setAccess(current);
+      try {sessionStorage.setItem(`gopsuc-access:${initialCode}`,token);} catch {}
+    } else if (lastLinkAccess.current?.code===initialCode) {
+      setAccess(lastLinkAccess.current);
+    } else {
+      setAccess(savedReceiptAccess(initialCode));
+    }
+    if (fragment.startsWith("#k=")) window.history.replaceState(window.history.state,"",receiptPath(initialCode));
     const controller=new AbortController();
     setBusy(true);
-    api<LookupResult>({action:"lookup",code:initialCode},controller.signal)
-      .then(result=>{ if (!controller.signal.aborted) {setGift(result.gift);setBooking(result.booking);} })
+    api<LookupResult>({action:"lookup",code:initialCode,withImpact:true},controller.signal)
+      .then(result=>{ if (!controller.signal.aborted) {setGift(result.gift);setBooking(result.booking);setImpact(result.impact);} })
       .catch(err=>{ if (!controller.signal.aborted) setError(getError(err)); })
       .finally(()=>{ if (!controller.signal.aborted) setBusy(false); });
     return ()=>controller.abort();
   },[initialCode]);
   async function process(confirm=false) {
     setBusy(true);setError("");setStatus("");
-    if (!confirm) {setGift(undefined);setBooking(undefined);}
+    if (!confirm) {setGift(undefined);setBooking(undefined);setImpact(undefined);}
     try {
-      if (confirm && gift) {
-        const r=await api<{receipt:Receipt;duplicate:boolean}>({action:"confirm",code:gift.code});
+      if (confirm && gift && access?.code===gift.code) {
+        const r=await api<{receipt:Receipt;duplicate:boolean}>({action:"confirm",code:gift.code,actionToken:access.token});
         setGift(r.receipt);setStatus(r.duplicate?"Giao dịch đã được ghi nhận trước đó.":"Đã ghi nhận khoản ủng hộ demo.");
+        setImpact(undefined);
+        const latest=await api<LookupResult>({action:"lookup",code:gift.code,withImpact:true}).catch(()=>null);
+        setImpact(latest?.impact);
       } else {
-        const result=await api<LookupResult>({action:"lookup",code:code.trim().toLowerCase()});
-        setGift(result.gift);setBooking(result.booking);
+        const requested=code.trim().toLowerCase();
+        setAccess(lastLinkAccess.current?.code===requested ? lastLinkAccess.current : savedReceiptAccess(requested));
+        const result=await api<LookupResult>({action:"lookup",code:requested,withImpact:true});
+        setGift(result.gift);setBooking(result.booking);setImpact(result.impact);
       }
     }catch(err){setError(getError(err));}finally{setBusy(false);}
   }
   return <><form className="form" onSubmit={event=>{event.preventDefault();void process();}}><label>Mã tra cứu<input value={code} onChange={e=>setCode(e.target.value)} required autoComplete="off" spellCheck={false}/></label><button disabled={busy} className="button">{busy?"Đang xử lý…":"Tra cứu"}</button></form>
-    {gift && <><ReceiptView gift={gift}/>{gift.kind==="cash" && gift.status==="pending" && <button className="button" disabled={busy} onClick={()=>void process(true)}>Xác nhận giao dịch demo</button>}</>}
+    {gift && <><ReceiptView gift={gift}/>{gift.kind==="cash" && gift.status==="pending" && (access?.code===gift.code ? <button className="button" disabled={busy} onClick={()=>void process(true)}>Xác nhận giao dịch demo</button> : <p>Phiếu chỉ xem. Hãy quét QR riêng hoặc mở liên kết thao tác đã lưu để xác nhận.</p>)}</>}
     {booking && <><div className="ticket"><strong>{booking.title}</strong><span>{vietnamTime(booking.startsAt)} · {booking.location}</span><span>{booking.status==="booked"?"Đã giữ 1 chỗ":"Đã hủy giữ chỗ"}</span></div>
       <a href={`/chien-dich/${booking.slug}#tinh-nguyen`}>Xem ca trên trang chiến dịch</a>
-      {booking.status==="booked" && Date.parse(booking.startsAt)>Date.now() && <details className="cancel-booking"><summary>Hủy giữ chỗ</summary><p>Chỗ này sẽ được mở lại cho người khác.</p><button type="button" className="button outline" disabled={busy} onClick={async()=>{
+      {booking.status==="booked" && Date.parse(booking.startsAt)>Date.now() && (access?.code===booking.code ? <details className="cancel-booking"><summary>Hủy giữ chỗ</summary><p>Chỗ này sẽ được mở lại cho người khác.</p><button type="button" className="button outline" disabled={busy} onClick={async()=>{
         setBusy(true);setError("");setStatus("");
         try {
-          const result=await api<{booking:VolunteerBooking}>({action:"cancelVolunteer",code:booking.code});
+          const result=await api<{booking:VolunteerBooking}>({action:"cancelVolunteer",code:booking.code,actionToken:access.token});
           setBooking(result.booking);setStatus("Đã hủy giữ chỗ.");
         } catch(err) {setError(getError(err));} finally {setBusy(false);}
-      }}>Xác nhận hủy</button></details>}
+      }}>Xác nhận hủy</button></details> : <p>Phiếu chỉ xem. Mở liên kết thao tác đã lưu nếu bạn cần hủy giữ chỗ.</p>)}
     </>}
-    {error && <p className="error" role="alert">{error}</p>}<p role="status">{status}</p></>;
+    {error && <p className="error" role="alert">{error}</p>}{status&&<p role="status">{status}</p>}
+    {impact ? <ReceiptImpact impact={impact}/> : gift && <a href={`/chien-dich/${gift.slug}#nhat-ky`}>Xem nhật ký chiến dịch</a>}
+  </>;
 }
 
-export function Matcher({titles}: {titles:Record<string,string>}) {
-  const [query,setQuery]=useState("");
-  const [busy,setBusy]=useState(false);
-  const [error,setError]=useState("");
-  const [result,setResult]=useState<MatchResult>();
-  async function suggest(text: string) {
-    setQuery(text);setBusy(true);setError("");setResult(undefined);
-    try { setResult(await api({action:"match",query:text})); }
-    catch (err) { setError(getError(err)); }
-    finally { setBusy(false); }
-  }
-  return <section className="ai-box" id="tim-cach-gop"><div><span className="ai-icon"><Sparkles size={24}/></span><h2>Bạn có gì để góp?</h2><p>AI gợi ý nơi đang cần món đồ của bạn, dựa trên số lượng còn nhận.</p></div>
-    <form className="form" onSubmit={e=>{e.preventDefault();void suggest(query);}}>
-      <label>Bạn muốn góp gì?<input value={query} onChange={e=>setQuery(e.target.value)} maxLength={220} required placeholder="Ví dụ: Mình có 15 bộ dụng cụ học tập"/></label>
-      <button className="button" disabled={busy}>{busy?"Đang tìm…":"Gợi ý bằng AI"}</button>
-      <div className="ai-examples" aria-label="Gợi ý để thử">{["Mình có 15 bộ dụng cụ học tập","Mình có gạo đóng túi","Mình muốn góp tiền"].map(text=><button key={text} type="button" disabled={busy} onClick={()=>void suggest(text)}>{text}</button>)}</div>
-    </form>
-    {error && <p className="error" role="alert">{error}</p>}
-    {result && <div className="ai-result" aria-live="polite">
-      {result.goods.map(item=>{
-        const formParams=new URLSearchParams({mon:String(item.id)});
-        if (item.suggested!==undefined) formParams.set("soLuong",String(item.suggested));
-        return <a key={item.id} href={`/chien-dich/${item.slug}?${formParams}#gop`}>
-          <b>{item.name}</b><span>{titles[item.slug]} · còn nhận {item.available} {item.unit}</span>
-          {item.suggested!==undefined && <span className={item.requested!==item.suggested?"match-partial":"match-complete"}>{item.requested===item.suggested
-            ? `Có thể nhận đủ ${item.suggested} ${item.unit}`
-            : `Có thể nhận ${item.suggested} trong ${item.requested} ${item.unit} bạn muốn góp`}</span>}
-          <small>{item.handoff}</small><span className="ai-result-action">Đăng ký góp</span>
-        </a>;
-      })}
-      {result.topics.some(t=>t.id==="money") && <a href="#chien-dich"><b>Ủng hộ bằng tiền</b><span>Chọn chiến dịch để tạo QR demo.</span></a>}
-      {!result.goods.length && !result.topics.some(t=>t.id==="money") && <p>Chưa tìm được nhu cầu phù hợp. Bạn có thể <a href="#chien-dich">xem các chiến dịch</a> hoặc mô tả rõ tên món đồ.</p>}
-    </div>}
-  </section>;
+function savedReceiptAccess(code:string) {
+  if (!/^[a-f0-9]{32}$/.test(code)) return undefined;
+  try {
+    const token=sessionStorage.getItem(`gopsuc-access:${code}`);
+    if (token && /^[a-f0-9]{64}$/.test(token)) return {code,token};
+  } catch {}
 }

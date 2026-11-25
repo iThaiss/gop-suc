@@ -3,26 +3,43 @@ import { test } from "node:test";
 import sharp from "sharp";
 import { bookVolunteer, campaign, cancelVolunteer, confirmCash, contribute, manage, needs, publicGifts, publicUpdatePhoto, receipt, updates, volunteerBooking, volunteerShifts } from "../lib/db.ts";
 import { classify, findMatches } from "../lib/match.ts";
+import { receiptAccessFromFragment, receiptPath } from "../lib/receipt-access.ts";
 import { encodeUpdateImage } from "../lib/update-image.ts";
 
 process.env.DATABASE_FILE = ":memory:";
 const slug = "lop-hoc-sau-mua";
 
+test("liên kết riêng để khóa trong fragment và liên kết chỉ xem không chứa khóa", () => {
+  const code="a".repeat(32), token="b".repeat(64);
+  const privateUrl=new URL(receiptPath(code,token),"https://gopsuc.example");
+  assert.equal(privateUrl.searchParams.get("ma"),code);
+  assert.ok(!privateUrl.search.includes(token));
+  assert.equal(receiptAccessFromFragment(privateUrl.hash),token);
+  assert.equal(receiptAccessFromFragment(privateUrl.hash+"&other=1"),null);
+  const publicUrl=new URL(receiptPath(code),privateUrl.origin);
+  assert.equal(publicUrl.hash,"");
+  assert.ok(!publicUrl.href.includes(token));
+});
+
 test("tiền chỉ cộng sau xác nhận và xác nhận lặp không cộng hai lần", async () => {
   const before = (await campaign(slug))!.received;
-  const gift = await contribute({slug,kind:"cash",amount:50_000});
+  const {gift,actionToken} = await contribute({slug,kind:"cash",amount:50_000});
   assert.equal((await campaign(slug))!.received,before);
-  assert.equal((await confirmCash(gift.code)).duplicate,false);
-  assert.equal((await confirmCash(gift.code)).duplicate,true);
+  assert.match(actionToken??"",/^[a-f0-9]{64}$/);
+  await assert.rejects(confirmCash(gift.code),/liên kết thao tác riêng/);
+  assert.equal((await confirmCash(gift.code,actionToken!)).duplicate,false);
+  assert.equal((await confirmCash(gift.code,actionToken!)).duplicate,true);
   assert.equal((await campaign(slug))!.received,before+50_000);
   assert.equal((await publicGifts(slug))[0].name,"****");
   assert.ok(!("name" in (await receipt(gift.code))!));
+  assert.ok(!("action_hash" in (await receipt(gift.code))!));
 });
 
 test("hẹn giao không vượt mục tiêu và cho phép xác nhận số thực nhận", async () => {
   const item=(await needs(slug))[0];
   await assert.rejects(()=>contribute({slug,kind:"goods",needId:item.id,amount:50}),/vượt quá/);
-  const gift=await contribute({slug,kind:"goods",needId:item.id,amount:15});
+  const {gift,actionToken}=await contribute({slug,kind:"goods",needId:item.id,amount:15});
+  assert.equal(actionToken,null);
   assert.equal((await needs(slug))[0].pledged,15);
   assert.equal((await needs(slug))[0].received,80);
   await assert.rejects(()=>manage("organizer",slug,"receive",{code:gift.code,actual:16}),/vượt quá/);
@@ -99,12 +116,13 @@ test("giữ chỗ tình nguyện không vượt sức chứa và hủy để m�
   await manage("organizer",slug,"addShift",fields);
   const shift=(await volunteerShifts(slug)).find(item=>item.title===fields.title)!;
   assert.equal(shift.startsAt,new Date(local+":00+07:00").toISOString());
-  const booking=await bookVolunteer(slug,shift.id);
+  const {booking,actionToken}=await bookVolunteer(slug,shift.id);
   assert.equal((await volunteerBooking(booking.code))?.status,"booked");
   await assert.rejects(()=>bookVolunteer(slug,shift.id),/đủ người/);
   await assert.rejects(()=>bookVolunteer("bep-am-cuoi-tuan",shift.id),/không còn mở/);
-  assert.equal((await cancelVolunteer(booking.code)).status,"cancelled");
-  assert.equal((await cancelVolunteer(booking.code)).status,"cancelled");
-  assert.equal((await bookVolunteer(slug,shift.id)).status,"booked");
+  await assert.rejects(cancelVolunteer(booking.code),/liên kết thao tác riêng/);
+  assert.equal((await cancelVolunteer(booking.code,actionToken)).status,"cancelled");
+  assert.equal((await cancelVolunteer(booking.code,actionToken)).status,"cancelled");
+  assert.equal((await bookVolunteer(slug,shift.id)).booking.status,"booked");
   await assert.rejects(()=>manage("organizer",slug,"addShift",{...fields,startLocal:"2025-02-30T12:00"}),/tương lai/);
 });

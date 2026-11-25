@@ -1,11 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import pg from "pg";
 import { postgresConfig } from "./postgres-config.ts";
-import type { Campaign, Need, Update, Expense, Receipt, Role, VolunteerShift, VolunteerBooking } from "./domain.ts";
+import type { Campaign, CampaignImpact, Need, Update, Expense, Receipt, Role, VolunteerShift, VolunteerBooking } from "./domain.ts";
 
 let connection: DatabaseSync | undefined;
 const campaignFields = `c.*, COALESCE((SELECT SUM(amount) FROM receipts WHERE slug=c.slug
@@ -61,6 +61,9 @@ function sqlite() {
   database.exec("BEGIN IMMEDIATE");
   try {
     if (database.prepare("INSERT OR IGNORE INTO metadata VALUES('seed-v1')").run().changes) seed(database);
+    if (database.prepare("INSERT OR IGNORE INTO metadata VALUES('receipt-action-access-v1')").run().changes) {
+      database.exec("ALTER TABLE receipts ADD COLUMN action_hash TEXT; ALTER TABLE volunteer_bookings ADD COLUMN action_hash TEXT;");
+    }
     if (database.prepare("INSERT OR IGNORE INTO metadata VALUES('volunteer-demo-v1')").run().changes) {
       const start = new Date(Date.now()+7*24*3600_000);
       start.setUTCHours(2,0,0,0);
@@ -153,6 +156,13 @@ function seed(d: DatabaseSync) {
 
 export const campaigns = (publicOnly = true) => all<Campaign>(`SELECT ${campaignFields} FROM campaigns c ${publicOnly ? "WHERE status!='draft'" : ""} ORDER BY c.rowid`)
 export const campaign = (slug: string) => get<Campaign>(`SELECT ${campaignFields} FROM campaigns c WHERE slug=?`,slug)
+export async function campaignImpact(slug: string): Promise<CampaignImpact | null> {
+  const row = await campaign(slug);
+  if (!row || row.status === "draft") return null;
+  const {title,status,received,spent,goal}=row;
+  const recent = await all<CampaignImpact["updates"][number]>("SELECT id,title,created FROM updates WHERE slug=? ORDER BY id DESC LIMIT 2",slug);
+  return {slug,title,status,received,spent,goal,updates:recent};
+}
 export const needs = (slug?: string) => all<Need>(`
   SELECT n.*, COALESCE(SUM(CASE WHEN r.status='confirmed' THEN r.actual ELSE 0 END),0) AS received,
   COALESCE(SUM(CASE WHEN r.status='pending' THEN r.amount ELSE 0 END),0) AS pledged
@@ -178,6 +188,16 @@ export const volunteerBooking = (code: string) => get<VolunteerBooking>(`
   FROM volunteer_bookings b JOIN volunteer_shifts s ON s.id=b.shiftId WHERE b.code=?
 `,code)
 export class RuleError extends Error {}
+export class ReceiptAccessError extends Error {
+  constructor(){super("Bạn cần mở liên kết thao tác riêng của phiếu này.");}
+}
+
+const actionDigest = (value: string) => createHash("sha256").update(value).digest();
+function requireReceiptAccess(stored: string | null | undefined, token: string | undefined) {
+  if (!stored || !/^[a-f0-9]{64}$/.test(stored) || !token || !/^[a-f0-9]{64}$/.test(token) || !timingSafeEqual(Buffer.from(stored,"hex"),actionDigest(token))) {
+    throw new ReceiptAccessError();
+  }
+}
 
 export async function transaction<T>(action:()=>Promise<T>):Promise<T> {
   if (transactionContext.getStore()) return action();
@@ -220,15 +240,15 @@ export function contribute(input: {slug:string;kind:"cash"|"goods";amount:number
       needId = need.id;
     }
     const code = randomBytes(16).toString("hex");
-    await all("INSERT INTO receipts(code,slug,kind,amount,needId,name,note) VALUES(?,?,?,?,?,?,?)",code,input.slug,input.kind,input.amount,needId,input.name || null,input.note || null);
-    return (await receipt(code))!;
+    const actionToken = input.kind === "cash" ? randomBytes(32).toString("hex") : null;
+    await all("INSERT INTO receipts(code,slug,kind,amount,needId,name,note,action_hash) VALUES(?,?,?,?,?,?,?,?)",code,input.slug,input.kind,input.amount,needId,input.name || null,input.note || null,actionToken ? actionDigest(actionToken).toString("hex") : null);
+    return {gift:(await receipt(code))!,actionToken};
   });
 }
 
-export function confirmCash(code: string) {
+export function confirmCash(code: string, actionToken?: string) {
   return transaction(async ()=>{
-    const previous = await receipt(code);
-    if (!previous || previous.kind !== "cash") throw new RuleError("Mã giao dịch không hợp lệ.");
+    requireReceiptAccess((await get<{action_hash:string|null}>("SELECT action_hash FROM receipts WHERE code=? AND kind='cash'",code))?.action_hash,actionToken);
     const change = await get("UPDATE receipts SET status='confirmed', actual=amount WHERE code=? AND status='pending' RETURNING code",code);
     return { receipt: (await receipt(code))!, duplicate: !change };
   });
@@ -241,15 +261,16 @@ export function bookVolunteer(slug: string, id: number) {
     if (!shift || Date.parse(shift.startsAt)<=Date.now()) throw new RuleError("Ca này đã qua hoặc không còn mở.");
     if (shift.reserved>=shift.capacity) throw new RuleError("Ca này đã đủ người.");
     const code=randomBytes(16).toString("hex");
-    await all("INSERT INTO volunteer_bookings VALUES(?,?,'booked')",code,id);
-    return (await volunteerBooking(code))!;
+    const actionToken=randomBytes(32).toString("hex");
+    await all("INSERT INTO volunteer_bookings(code,shiftId,status,action_hash) VALUES(?,?,'booked',?)",code,id,actionDigest(actionToken).toString("hex"));
+    return {booking:(await volunteerBooking(code))!,actionToken};
   });
 }
 
-export function cancelVolunteer(code: string) {
+export function cancelVolunteer(code: string, actionToken?: string) {
   return transaction(async ()=>{
-    const booking=await volunteerBooking(code);
-    if (!booking) throw new RuleError("Không tìm thấy phiếu tình nguyện.");
+    requireReceiptAccess((await get<{action_hash:string|null}>("SELECT action_hash FROM volunteer_bookings WHERE code=?",code))?.action_hash,actionToken);
+    const booking=(await volunteerBooking(code))!;
     if (booking.status==="cancelled") return booking;
     if (Date.parse(booking.startsAt)<=Date.now()) throw new RuleError("Ca đã bắt đầu và không thể hủy.");
     await all("UPDATE volunteer_bookings SET status='cancelled' WHERE code=?",code);

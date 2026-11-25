@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { HeartHandshake, MapPin, PackageCheck, Search, Wallet } from "lucide-react";
-import { Matcher } from "../components/client";
+import { GivingAssistant } from "../components/giving-assistant";
 import { campaigns, needs } from "../lib/db";
 import { categories, money, picture } from "../lib/domain";
 
@@ -36,7 +36,7 @@ export default async function Home({searchParams}: {searchParams:Promise<{nhom?:
         <span className="demo-label">Bản demo gây quỹ cộng đồng</span>
         <h1>Cùng góp sức<br/>cho <em>điều tử tế.</em></h1>
         <p>Góp tiền, hiện vật hoặc thời gian cho những việc cụ thể. Theo dõi từ lúc đóng góp đến khi bàn giao.</p>
-        <div className="row"><a className="button" href="#chien-dich">Khám phá chiến dịch</a><a className="button outline" href="#tim-cach-gop">Tìm nơi cần đồ bạn có</a></div>
+        <div className="row"><a className="button" href="#chien-dich">Khám phá chiến dịch</a><a className="button outline" href="#tim-cach-gop">Thử trợ lý tìm cách góp</a></div>
       </div>
       {featured && <Link href={"/chien-dich/" + featured.slug} className="masthead-story">
         <span><MapPin size={15}/>{featured.location}</span><strong>{featured.title}</strong>
@@ -48,6 +48,7 @@ export default async function Home({searchParams}: {searchParams:Promise<{nhom?:
       <div><PackageCheck size={23}/><span><strong>{openNeeds.length}</strong><small>Nhu cầu hiện vật còn mở</small></span></div>
       <span className="impact-note">Số liệu mô phỏng</span>
     </section>
+    <GivingAssistant locations={[...new Set(active.map(c=>c.location))]}/>
     <section className="campaigns" id="chien-dich">
       <div className="section-head">
         <div><h2>Tìm chiến dịch</h2><p>Chọn một việc bạn muốn góp sức.</p></div>
@@ -77,6 +78,5 @@ export default async function Home({searchParams}: {searchParams:Promise<{nhom?:
       })}</div>
       {!filtered.length && <div className="empty-campaigns"><p>Chưa tìm thấy chiến dịch phù hợp.</p><Link href="/#chien-dich">Xem tất cả chiến dịch</Link></div>}
     </section>
-    <Matcher titles={Object.fromEntries(rows.map(c => [c.slug,c.title]))}/>
   </div>;
 }

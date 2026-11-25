@@ -9,7 +9,7 @@ import { campaign, expenses, needs, publicGifts, updates, volunteerShifts } from
 import { money, picture, updateDate, updatePicture } from "../../../lib/domain";
 
 export const dynamic = "force-dynamic";
-type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string;soLuong?:string}>};
+type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string;soLuong?:string;gop?:string;soTien?:string;ca?:string}>};
 export async function generateMetadata({params}:Props):Promise<Metadata> {
   const c=await campaign((await params).slug);
   if (!c || c.status==="draft") return {};
@@ -19,11 +19,14 @@ export async function generateMetadata({params}:Props):Promise<Metadata> {
 export default async function CampaignPage({params,searchParams}:Props) {
   const c=await campaign((await params).slug);
   if (!c || c.status==="draft") notFound();
-  const {mon,soLuong}=await searchParams;
+  const {mon,soLuong,gop,soTien,ca}=await searchParams;
+  const initialCash=gop==="tien" ? typeof soTien==="string" && /^[1-9]\d{3,9}$/.test(soTien) && Number(soTien)<=1_000_000_000 ? Number(soTien) : null : undefined;
+  const initialShift=typeof ca==="string"&&/^[1-9]\d{0,9}$/.test(ca)?Number(ca):undefined;
   const [items,posts,bills,gifts,allShifts]=await Promise.all([needs(c.slug),updates(c.slug),expenses(c.slug),publicGifts(c.slug),volunteerShifts(c.slug)]);
   const shifts=allShifts.filter(shift=>Date.parse(shift.startsAt)>Date.now());
   const percent=Math.min(100,Math.floor(c.received/c.goal*100));
   return <Give campaign={{slug:c.slug,title:c.title,status:c.status}} needs={items.map(item=>({...item}))}
+    initialCash={initialCash}
     initialNeed={typeof mon==="string" && /^[1-9]\d{0,14}$/.test(mon) ? Number(mon) : undefined}
     initialAmount={typeof soLuong==="string" && /^[1-9]\d{0,5}$/.test(soLuong) ? Number(soLuong) : undefined}>
     <div className="shell detail"><Link href="/#chien-dich" className="back">Tất cả chiến dịch</Link>
@@ -41,12 +44,16 @@ export default async function CampaignPage({params,searchParams}:Props) {
     <nav className="detail-jumps" aria-label="Các mục của chiến dịch"><a href="#hien-vat">Hiện vật</a>{shifts.length>0&&<a href="#tinh-nguyen">Tình nguyện</a>}<a href="#nhat-ky">Nhật ký</a><a href="#thu-chi">Thu chi</a></nav>
     <div className="detail-body">
       <div>
-        <section className="panel" id="hien-vat"><h2>Hiện vật đang cần</h2>{items.map(n=><article key={n.id} className="need">
-          <div><Package size={20}/><b>{n.name}</b></div><progress aria-label={`Tiến độ nhận ${n.name}`} value={n.received} max={n.target}/>
-          <div className="need-details"><div><p><b>{n.received}/{n.target} {n.unit} đã nhận</b> · {n.pledged} {n.unit} đã hẹn · còn nhận hẹn {Math.max(0,n.target-n.received-n.pledged)} {n.unit}</p><small>{n.handoff}</small></div>
-            <GiveNeedButton id={n.id} name={n.name}/></div>
-        </article>)}{!items.length && <p>Chiến dịch chưa công bố nhu cầu hiện vật.</p>}</section>
-        {shifts.length>0 && <VolunteerShifts items={shifts.map(shift=>({...shift}))} open={c.status==="active"}/>}
+        <section className="panel" id="hien-vat"><h2>Hiện vật đang cần</h2>{items.map(n=>{
+          const remaining=Math.max(0,n.target-n.received-n.pledged);
+          return <article key={n.id} className="need">
+            <div><Package size={20}/><h3>{n.name}</h3></div>
+            <div className="need-progress" aria-hidden="true"><span style={{width:`${n.received/n.target*100}%`}}/><span style={{width:`${n.pledged/n.target*100}%`}}/></div>
+            <ul className="need-progress-labels"><li><strong>{n.received}/{n.target} {n.unit}</strong> đã nhận</li><li><strong>{n.pledged} {n.unit}</strong> đã hẹn</li><li><strong>{remaining} {n.unit}</strong> còn nhận hẹn</li></ul>
+            <div className="need-details"><small>{n.handoff}</small><GiveNeedButton id={n.id} name={n.name}/></div>
+          </article>;
+        })}{!items.length && <p>Chiến dịch chưa công bố nhu cầu hiện vật.</p>}</section>
+        {(shifts.length>0||initialShift!==undefined) && <VolunteerShifts items={shifts.map(shift=>({...shift}))} open={c.status==="active"} initialShift={initialShift}/>}
         <section className="panel" id="nhat-ky"><h2>Nhật ký và ảnh bàn giao</h2>{posts.length>0 ? <ol className="post-timeline">{posts.map(post=>{
           const photo=updatePicture(post);
           const path=`/chien-dich/${c.slug}/cap-nhat/${post.id}`;

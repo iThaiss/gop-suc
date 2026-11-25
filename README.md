@@ -17,7 +17,7 @@ SQLite tạo dữ liệu mẫu ở `.data/gopsuc.sqlite` trong lần chạy đ�
 
 ### Triển khai Vercel và Supabase
 
-Tạo project Supabase riêng cho đồ án và áp dụng migration trong `supabase/migrations`. Migration nạp ba chiến dịch mẫu vào schema riêng. Cấu hình mật khẩu cho role máy chủ `gopsuc_runtime` và dùng URL Transaction Pooler của chính role đó trong `DATABASE_URL`. Giữ URL này trong biến môi trường máy chủ. Role không có quyền quản trị cơ sở dữ liệu.
+Tạo project Supabase riêng cho đồ án và áp dụng lần lượt các migration trong `supabase/migrations` trước khi triển khai web. Migration đầu nạp ba chiến dịch mẫu vào schema riêng; migration quyền phiếu lưu mã băm cho quyền xác nhận hoặc hủy. Cấu hình mật khẩu cho role máy chủ `gopsuc_runtime` và dùng URL Transaction Pooler của chính role đó trong `DATABASE_URL`. Giữ URL này trong biến môi trường máy chủ. Role không có quyền quản trị cơ sở dữ liệu.
 
 Trong project Vercel, thêm `DATABASE_URL`, `SITE_URL` (địa chỉ HTTPS chính thức), `ADMIN_PASSWORD` và `ORGANIZER_PASSWORD` vào môi trường Production. Bản chạy trên Vercel yêu cầu PostgreSQL. Bản chạy trên máy vẫn dùng SQLite nếu không đặt `DATABASE_URL`. Chạy `node scripts/check-hosted-db.mjs` để kiểm tra đọc, ghi và các luồng nghiệp vụ trên PostgreSQL. Các bản ghi kiểm tra nằm trong một giao dịch hoàn tác.
 
@@ -31,16 +31,18 @@ Trong project Vercel, thêm `DATABASE_URL`, `SITE_URL` (địa chỉ HTTPS chín
 | Tiền và hiện vật | `app/api/gopsuc/route.ts`, `lib/db.ts` | Kiểm tra đầu vào ở máy chủ, cập nhật trong giao dịch SQLite, xác nhận tiền lặp chỉ cộng một lần. Lịch hẹn giữ chỗ hiện vật và ghi số thực nhận riêng. |
 | Quản trị và thu chi | `app/quan-tri`, `lib/session.ts` | Máy chủ kiểm tra vai trò trước thao tác. Chỉ quản trị viên có thể duyệt, đóng và ghi khoản chi. Các khoản chi vượt số dư bị từ chối. |
 | Ca tình nguyện | `components/volunteer.tsx`, `lib/db.ts` | Người tổ chức đặt giờ Việt Nam và giới hạn số chỗ. Mỗi lần đăng ký cấp mã riêng để tra cứu hoặc trả chỗ trước giờ bắt đầu. Hệ thống kiểm tra sức chứa trong cùng giao dịch với việc giữ chỗ. |
+| Theo dõi sau khi góp | `app/tra-cuu`, `components/receipt-impact.tsx` | Phiếu cá nhân tách riêng với kết quả chung của chiến dịch. Xem tiến độ, liên kết thu chi và hai cập nhật công khai gần nhất, kể cả sau khi chiến dịch đóng. |
+| Quyền trên phiếu | `lib/receipt-access.ts`, `lib/db.ts` | Mã tra cứu chỉ dùng để đọc. QR mô phỏng để xác nhận và liên kết để hủy ca có khóa riêng; chỉ bản băm lưu trên máy chủ. Phiếu cũ vẫn xem được nhưng xác nhận/hủy từ mã cũ không còn được phép. Giữ liên kết thao tác riêng để dùng lại sau khi đóng tab. |
 | Ảnh bàn giao | `lib/update-image.ts`, `app/api/gopsuc/photos` | Người tổ chức có thể thêm một ảnh JPEG, PNG hoặc WebP vào bài cập nhật. Máy chủ giới hạn 4 MB, nén thành WebP tối đa 1280 px, loại metadata rồi lưu cùng bài. Ảnh của chiến dịch chờ duyệt chưa có URL truy cập công khai. |
-| AI tìm cách góp | `lib/match.ts` | Phân loại gần nhất từ các câu tiếng Việt gắn nhãn. Chuẩn hóa dấu, dùng đặc trưng từ/cặp từ và tính độ tương đồng cosine. Sau khi nhận dạng loại hiện vật, lấy số lượng và lịch còn mở từ SQLite. Nếu câu có một số lượng rõ ràng và cùng đơn vị, biểu mẫu điền sẵn tối đa số còn nhận. |
+| Trợ lý tìm cách góp | `lib/match.ts`, `lib/assist.ts`, `components/giving-assistant.tsx` | Tách câu tiếng Việt thành các nhóm hiện vật, số lượng, khu vực, ngày/buổi tình nguyện và số tiền mô phỏng. Có thể sửa điều kiện và tìm lại. Máy chủ chỉ trả nhu cầu/công việc đang mở, chặn sai đơn vị và số hiện vật gợi ý không vượt phần còn nhận. |
 
-Mô hình phân loại chạy cục bộ, dùng bộ ví dụ nhỏ và có ngưỡng từ chối. Đây là AI theo phạm vi hẹp, không cần khóa API. Người dùng vẫn có thể duyệt chiến dịch thủ công. Bản đồ án kế thừa luồng QR, số tiền nhanh, ẩn danh, công khai giao dịch và ảnh cập nhật từ ý tưởng A1K45. Mã trên repo này là bản đồ án riêng với dữ liệu demo, chức năng hiện vật, quản trị đa chiến dịch, tra cứu, chia sẻ và AI được triển khai cho đề tài mới.
+Trợ lý dùng bộ phân loại dựa trên độ tương đồng với câu mẫu kết hợp quy tắc số lượng/lịch, chạy trên máy chủ Góp Sức và không gửi câu hỏi ra ngoài. Đây là AI theo phạm vi hẹp, không phải chatbot tạo sinh, không cần khóa API. Nếu không rõ số lượng hoặc lịch, trợ lý cho sửa điều kiện thay vì cam kết đã giữ chỗ. Bộ lọc ngày và buổi áp dụng cho giờ bắt đầu ca tình nguyện; giờ nhận hiện vật vẫn hiển thị theo nội dung ban tổ chức nhập. Bản đồ án kế thừa luồng QR, số tiền nhanh, ẩn danh, công khai giao dịch và ảnh cập nhật từ ý tưởng A1K45. Mã trên repo này là bản đồ án riêng với dữ liệu demo, chức năng hiện vật, quản trị đa chiến dịch, tra cứu, chia sẻ và AI được triển khai cho đề tài mới.
 
 ## Kịch bản trình bày cho ba người
 
 1. **Người 1 — khách ủng hộ và chia sẻ.** Mở chiến dịch lớp học, bấm chia sẻ, tạo QR 50k dưới chế độ ẩn danh và xác nhận. Mở lại bằng mã tra cứu để thấy khoản góp đã ghi nhận. Trình bày lý do số tiền chờ không có trong tổng tiền.
 2. **Người 2 — quản trị và minh bạch.** Tạo chiến dịch bằng vai trò người tổ chức. Đăng nhập vai trò quản trị viên để duyệt. Mở phần thu chi và thử ghi một khoản vượt số dư. Giải thích cách cookie phiên và API quản lý quyền.
-3. **Người 3 — hiện vật và AI.** Nhập “Mình có 15 bộ dụng cụ học tập” rồi mở kết quả để thấy biểu mẫu điền sẵn 15 bộ. Tạo phiếu hẹn, xác nhận thực nhận 12, rồi thử nhập 90 bộ để thấy hệ thống chỉ đề xuất phần còn nhận. Hỏi “mình có một cây đàn piano” để minh họa trường hợp không có nhu cầu phù hợp.
+3. **Người 3 — hiện vật và AI.** Nhập “Mình có 15 bộ dụng cụ học tập ở Quảng Nam và muốn phụ đóng gói”. Mở kết quả góp hiện vật và kiểm tra form đã điền 15 bộ. Tạo phiếu, xác nhận thực nhận 12, rồi mở lại phiếu và so với tiến độ chung. Thử đổi khu vực của cùng một yêu cầu để thấy kết quả đổi theo dữ liệu, và hỏi “mình có một cây đàn piano” để kiểm tra trường hợp không phù hợp. Đảm bảo ca đóng gói ở tương lai nếu demo gợi ý tình nguyện.
 
 GitHub lưu lịch sử triển khai. Khi trình bày, ghi rõ phần nào được AI hỗ trợ tạo và phần nào nhóm tự kiểm tra, chỉnh sửa hoặc bổ sung. Mỗi thành viên nên chạy thử luồng mình trình bày và xem một tệp mã tương ứng.
 
@@ -50,9 +52,10 @@ GitHub lưu lịch sử triển khai. Khi trình bày, ghi rõ phần nào đư�
 npm run check
 npm test
 npm run build
+npm run test:api
 ```
 
-Tạo nhánh riêng cho mỗi thay đổi rồi mở pull request. GitHub Actions chạy kiểm tra kiểu dữ liệu, kiểm thử và build. Tệp cơ sở dữ liệu, cấu hình cá nhân và dữ liệu thật không được đưa lên Git.
+Tạo nhánh riêng cho mỗi thay đổi rồi mở pull request. GitHub Actions chạy kiểm tra kiểu dữ liệu, kiểm thử nghiệp vụ, build và kiểm tra API quản trị trên bản build. Kiểm tra API tự khởi động một bản chạy cục bộ với SQLite tạm, không sử dụng dữ liệu đang chạy hoặc dữ liệu online. Tệp cơ sở dữ liệu, cấu hình cá nhân và dữ liệu thật không được đưa lên Git.
 
 ### Tham khảo
 

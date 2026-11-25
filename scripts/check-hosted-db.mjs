@@ -13,7 +13,8 @@ if (!url) {
 }
 if (!url) throw new Error("Missing DATABASE_URL");
 process.env.DATABASE_URL=url;
-const {all,bookVolunteer,campaign,campaigns,cancelVolunteer,confirmCash,contribute,manage,needs,publicUpdatePhoto,transaction,updates,volunteerShifts}=await import("../lib/db.ts");
+const {all,bookVolunteer,campaign,campaignImpact,campaigns,cancelVolunteer,confirmCash,contribute,manage,needs,publicUpdatePhoto,transaction,updates,volunteerShifts}=await import("../lib/db.ts");
+const {assistMatches,parseAssist}=await import("../lib/assist.ts");
 const [rows,items,posts,shifts]=await Promise.all([
   campaigns(),needs(),updates("lop-hoc-sau-mua"),volunteerShifts("lop-hoc-sau-mua"),
 ]);
@@ -28,8 +29,9 @@ try {
   await session.query("BEGIN");
   const found=await session.query("insert into gopsuc.limits (key,count,until) values ($1,1,0) returning count",["deployment-check"]);
   assert.equal(found.rows[0].count,1);
-  const roles=await session.query("select has_schema_privilege('anon','gopsuc','USAGE') as anon, current_user as role");
+  const roles=await session.query("select has_schema_privilege('anon','gopsuc','USAGE') as anon, has_column_privilege('anon','gopsuc.receipts','action_hash','SELECT') as anon_hash, current_user as role");
   assert.equal(roles.rows[0].anon,false);
+  assert.equal(roles.rows[0].anon_hash,false);
   assert.equal(roles.rows[0].role,"gopsuc_runtime");
   console.log("PostgreSQL: read models, runtime writes, and private schema verified.");
 } finally {
@@ -44,13 +46,14 @@ await assert.rejects(transaction(async()=>{
   await manage("organizer",slug,"create",draft);
   await manage("organizer",slug,"editDraft",{...draft,title:"Updated"});
   await manage("admin",slug,"publish",{});
-  const cash=await contribute({slug,kind:"cash",amount:25000});
-  assert.equal((await confirmCash(cash.code)).duplicate,false);
-  assert.equal((await confirmCash(cash.code)).duplicate,true);
+  const {gift:cash,actionToken:cashToken}=await contribute({slug,kind:"cash",amount:25000});
+  await assert.rejects(confirmCash(cash.code),/liên kết thao tác riêng/);
+  assert.equal((await confirmCash(cash.code,cashToken)).duplicate,false);
+  assert.equal((await confirmCash(cash.code,cashToken)).duplicate,true);
   assert.equal((await campaign(slug)).received,25000);
   await manage("organizer",slug,"need",{name:"Dụng cụ",unit:"bộ",target:5,handoff:"Điểm demo",topic:"learning"});
   const [item]=await needs(slug);
-  const goods=await contribute({slug,kind:"goods",amount:5,needId:item.id});
+  const {gift:goods}=await contribute({slug,kind:"goods",amount:5,needId:item.id});
   await assert.rejects(contribute({slug,kind:"goods",amount:1,needId:item.id}), /vượt quá/);
   await manage("organizer",slug,"receive",{code:goods.code,actual:4});
   assert.equal((await needs(slug))[0].received,4);
@@ -61,9 +64,18 @@ await assert.rejects(transaction(async()=>{
   const local=new Date(Date.now()+48*3600_000).toISOString().slice(0,16);
   await manage("organizer",slug,"addShift",{title:"Test shift",location:"Demo",startLocal:local,capacity:1});
   const [shift]=await volunteerShifts(slug);
-  const booking=await bookVolunteer(slug,shift.id);
+  const intent=parseAssist("Mình có 15 bộ dụng cụ học tập ở Huế, muốn tình nguyện hoặc góp 20k",["Huế"]);
+  const live=assistMatches(intent.filters,[(await campaign(slug))],await needs(slug),[shift]);
+  assert.equal(live.goods[0].suggested,1);
+  assert.equal(live.volunteer[0].available,1);
+  assert.equal(live.cash[0].amount,20000);
+  const impact=await campaignImpact(slug);
+  assert.equal(impact.received,25000);
+  assert.deepEqual(impact.updates.map(update=>update.title),["Test photo"]);
+  const {booking,actionToken:bookingToken}=await bookVolunteer(slug,shift.id);
   await assert.rejects(bookVolunteer(slug,shift.id),/đủ người/);
-  assert.equal((await cancelVolunteer(booking.code)).status,"cancelled");
+  await assert.rejects(cancelVolunteer(booking.code,cashToken),/liên kết thao tác riêng/);
+  assert.equal((await cancelVolunteer(booking.code,bookingToken)).status,"cancelled");
   await all("INSERT INTO sessions VALUES(?,?,?)","deployment-check","admin",0);
   await all("DELETE FROM sessions WHERE token=?","deployment-check");
   await manage("admin",slug,"expense",{title:"Test",amount:25000,evidence:"Demo"});
@@ -71,5 +83,5 @@ await assert.rejects(transaction(async()=>{
   throw rollback;
 }),error=>error===rollback);
 assert.equal(await campaign("kiem-tra-trien-khai"),undefined);
-console.log("Campaigns, QR, goods, multimedia, shifts, sessions and expenses verified without keeping test data.");
+console.log("Campaigns, private QR access, goods, impact, assistant, shifts, sessions and expenses verified without keeping test data.");
 process.exit(0);

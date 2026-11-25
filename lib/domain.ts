@@ -11,6 +11,9 @@ export type Need = {
   pledged: number; handoff: string; topic: string;
 };
 export type Update = { id: number; slug: string; title: string; body: string; image: string; created: string; hasPhoto: number };
+export type CampaignImpact = Pick<Campaign, "slug" | "title" | "status" | "received" | "spent" | "goal"> & {
+  updates: Pick<Update, "id" | "title" | "created">[];
+};
 export type Expense = { id: number; title: string; amount: number; evidence: string; created: string };
 export type Receipt = {
   code: string; slug: string; kind: "cash" | "goods"; amount: number;

@@ -3,12 +3,12 @@ import type { Need } from "./domain.ts";
 export const topics = [
   { id: "learning", label: "Đồ dùng học tập", examples: ["bút thước vở học sinh", "sách cặp sách balo", "bộ dụng cụ học tập", "tập vở cho trường", "viết chì và tập"] },
   { id: "cleaning", label: "Vật tư vệ sinh", examples: ["xà phòng khăn lau", "bột giặt nước rửa tay", "chổi cây lau nhà", "bộ vệ sinh lớp học", "nước tẩy rửa"] },
-  { id: "food", label: "Thực phẩm", examples: ["gạo đóng túi", "mì gói dầu ăn", "gạo tẻ túi", "mua thực phẩm", "lương thực nấu cơm"] },
+  { id: "food", label: "Thực phẩm", examples: ["gạo đóng túi", "mì gói dầu ăn", "gạo tẻ túi", "ký gạo", "kg gạo", "mua thực phẩm", "lương thực nấu cơm"] },
   { id: "blankets", label: "Chăn ấm", examples: ["chăn mền", "mền sạch", "chăn bông", "chăn ấm mùa đông", "mền đắp"] },
   { id: "money", label: "Ủng hộ tiền", examples: ["chuyển khoản", "ủng hộ tiền", "gửi kinh phí", "góp tiền", "gửi đồng vnd", "đóng góp tài chính"] },
 ] as const;
 
-const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{M}/gu,"").replace(/đ/g,"d");
+export const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{M}/gu,"").replace(/đ/g,"d");
 const stop = new Set(["minh","toi","co","muon","gui","gop","cho","can","cai","bo","the","va","nhung","mang","ap"]);
 function features(text: string) {
   const words = normalize(text).match(/[a-z]+/g)?.filter(w => !stop.has(w)) ?? [];
@@ -33,14 +33,15 @@ const unitGroups = {
   set: ["bo"],
   weight: ["kg", "ky", "can", "kilogam", "kilogram"],
   piece: ["chiec", "cai"],
+  book: ["quyen", "cuon"],
 } as const;
 
-function unitGroup(unit: string) {
+export function unitGroup(unit: string) {
   const token = normalize(unit.trim());
   return Object.entries(unitGroups).find(([, group]) => (group as readonly string[]).includes(token))?.[0];
 }
 
-function quantityIntent(query: string) {
+export function quantityIntent(query: string) {
   const plain = normalize(query);
   const units = Object.values(unitGroups).flat().join("|");
   const quantities = [...plain.matchAll(new RegExp(`(?<![\\d.,])([1-9]\\d{0,4})\\s*(${units})\\b`, "g"))];
