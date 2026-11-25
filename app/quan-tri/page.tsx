@@ -114,6 +114,8 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
           <details className="admin-disclosure"><summary><Plus size={18}/> Đăng cập nhật</summary>
             <ActionForm action="update" slug={selected.slug} label="Đăng bài">
               <label>Tiêu đề<input name="title" maxLength={100} required/></label><label>Nội dung<textarea name="body" maxLength={900} required/></label><label>Ảnh minh họa<CoverChoice optional/></label>
+              <label>Ảnh bàn giao<input type="file" name="photo" accept="image/jpeg,image/png,image/webp"/></label>
+              <small>JPEG, PNG hoặc WebP, tối đa 4 MB. Nếu tải ảnh lên, ảnh này sẽ thay ảnh minh họa khi bài xuất hiện công khai.</small>
             </ActionForm>
           </details>
           <h3>Khoản chi đã công bố</h3>{bills.length ? <ul className="admin-need-list">{bills.map(bill=><li key={bill.id}><b>{bill.title}</b><span>{money(bill.amount)}</span></li>)}</ul> : <p>Chưa có khoản chi.</p>}

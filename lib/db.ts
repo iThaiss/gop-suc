@@ -41,6 +41,8 @@ export function db() {
     CREATE TABLE IF NOT EXISTS updates(
       id INTEGER PRIMARY KEY, slug TEXT NOT NULL REFERENCES campaigns(slug), title TEXT NOT NULL,
       body TEXT NOT NULL, image TEXT NOT NULL DEFAULT '', created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS update_photos(
+      updateId INTEGER PRIMARY KEY REFERENCES updates(id) ON DELETE CASCADE, image BLOB NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, role TEXT NOT NULL, until INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY);
@@ -84,7 +86,11 @@ export const needs = (slug?: string) => db().prepare(`
   COALESCE(SUM(CASE WHEN r.status='pending' THEN r.amount ELSE 0 END),0) AS pledged
   FROM needs n JOIN campaigns c ON c.slug=n.slug LEFT JOIN receipts r ON r.needId=n.id
   WHERE ${slug ? "n.slug=?" : "c.status='active'"} GROUP BY n.id ORDER BY n.id`).all(...(slug ? [slug] : [])) as unknown as Need[];
-export const updates = (slug: string) => db().prepare("SELECT * FROM updates WHERE slug=? ORDER BY id DESC").all(slug) as unknown as Update[];
+export const updates = (slug: string) => db().prepare("SELECT u.*,EXISTS(SELECT 1 FROM update_photos p WHERE p.updateId=u.id) AS hasPhoto FROM updates u WHERE slug=? ORDER BY id DESC").all(slug) as unknown as Update[];
+export const publicUpdatePhoto = (slug: string, id: number) => db().prepare(`
+  SELECT p.image FROM update_photos p JOIN updates u ON u.id=p.updateId JOIN campaigns c ON c.slug=u.slug
+  WHERE u.slug=? AND u.id=? AND c.status!='draft'
+`).get(slug,id)?.image as Uint8Array | undefined;
 export const expenses = (slug: string) => db().prepare("SELECT id,title,amount,evidence,created FROM expenses WHERE slug=? ORDER BY id DESC").all(slug) as unknown as Expense[];
 export const publicGifts = (slug: string) => db().prepare("SELECT COALESCE(name,'****') AS name,amount,note FROM receipts WHERE slug=? AND kind='cash' AND status='confirmed' ORDER BY rowid DESC LIMIT 8").all(slug) as unknown as {name:string;amount:number;note:string|null}[];
 export const receipt = (code: string) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.code=?`).get(code) as Receipt | undefined;
@@ -131,7 +137,7 @@ export function confirmCash(code: string) {
   });
 }
 
-export function manage(role: Role, slug: string, action: string, input: Record<string, string | number>) {
+export function manage(role: Role, slug: string, action: string, input: Record<string, string | number>, photo?: Uint8Array) {
   return transaction((d) => {
     const c = campaign(slug);
     if (action === "create") {
@@ -152,7 +158,8 @@ export function manage(role: Role, slug: string, action: string, input: Record<s
       if (c.status === "closed") throw new RuleError("Chiến dịch đã đóng.");
       d.prepare("INSERT INTO needs(slug,name,unit,target,handoff,topic) VALUES(?,?,?,?,?,?)").run(slug,input.name,input.unit,input.target,input.handoff,input.topic);
     } else if (action === "update") {
-      d.prepare("INSERT INTO updates(slug,title,body,image) VALUES(?,?,?,?)").run(slug,input.title,input.body,input.image);
+      const post = d.prepare("INSERT INTO updates(slug,title,body,image) VALUES(?,?,?,?)").run(slug,input.title,input.body,photo ? "" : input.image);
+      if (photo) d.prepare("INSERT INTO update_photos VALUES(?,?)").run(post.lastInsertRowid,photo);
     } else if (action === "expense") {
       if (role !== "admin") throw new RuleError("Cần quyền quản trị để ghi khoản chi đã duyệt.");
       if (Number(input.amount) > c.received - c.spent) throw new RuleError("Khoản chi vượt quá số dư.");

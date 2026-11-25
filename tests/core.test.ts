@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { campaign, confirmCash, contribute, manage, needs, publicGifts, receipt } from "../lib/db.ts";
+import sharp from "sharp";
+import { campaign, confirmCash, contribute, manage, needs, publicGifts, publicUpdatePhoto, receipt, updates } from "../lib/db.ts";
 import { classify, findMatches } from "../lib/match.ts";
+import { encodeUpdateImage } from "../lib/update-image.ts";
 
 process.env.DATABASE_FILE = ":memory:";
 const slug = "lop-hoc-sau-mua";
@@ -70,4 +72,23 @@ test("AI chỉ điền số lượng cùng đơn vị và không vượt sức n
   assert.equal(school("Mình có 15–20 bộ dụng cụ học tập")?.suggested,undefined);
   assert.equal(school("Mình có 15 bộ dụng cụ học tập và 5 kg gạo")?.suggested,undefined);
   assert.equal(findMatches("Tôi góp 5 ký gạo",rows).goods.find(n=>n.topic==="food")?.suggested,5);
+});
+
+test("Ảnh cập nhật được nén, bỏ metadata và chỉ công khai sau khi duyệt chiến dịch", async () => {
+  const source = await sharp({create:{width:1600,height:300,channels:3,background:"green"}}).withMetadata().jpeg().toBuffer();
+  const photo = await encodeUpdateImage(new File([Uint8Array.from(source)],"test.jpg",{type:"image/jpeg"}));
+  const output = await sharp(photo).metadata();
+  assert.equal(output.format,"webp");
+  assert.equal(output.width,1280);
+  assert.equal(output.exif,undefined);
+  await assert.rejects(encodeUpdateImage(new File(["not a photo"],"fake.png",{type:"image/png"})),/Không đọc được ảnh/);
+  manage("organizer","thu-anh","create",{title:"Ảnh bàn giao",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:50000});
+  manage("organizer","thu-anh","update",{title:"Cập nhật",body:"Demo",image:"school"},photo);
+  const [post]=updates("thu-anh");
+  assert.equal(post.hasPhoto,1);
+  assert.equal(post.image,"");
+  assert.equal(publicUpdatePhoto("thu-anh",post.id),undefined);
+  manage("admin","thu-anh","publish",{});
+  assert.deepEqual(Buffer.from(publicUpdatePhoto("thu-anh",post.id)!),photo);
+  assert.equal(publicUpdatePhoto(slug,post.id),undefined);
 });

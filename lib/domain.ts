@@ -10,7 +10,7 @@ export type Need = {
   id: number; slug: string; name: string; unit: string; target: number; received: number;
   pledged: number; handoff: string; topic: string;
 };
-export type Update = { id: number; slug: string; title: string; body: string; image: string; created: string };
+export type Update = { id: number; slug: string; title: string; body: string; image: string; created: string; hasPhoto: number };
 export type Expense = { id: number; title: string; amount: number; evidence: string; created: string };
 export type Receipt = {
   code: string; slug: string; kind: "cash" | "goods"; amount: number;
@@ -19,4 +19,10 @@ export type Receipt = {
 };
 export const money = (n: number) => new Intl.NumberFormat("vi-VN", {style:"currency",currency:"VND"}).format(n);
 export const picture = (cover: string) => covers.includes(cover as typeof covers[number]) ? `/photos/${cover}.webp` : "/photos/school.webp";
+export const updatePicture = (post: Update) => post.hasPhoto ? `/api/gopsuc/photos/${post.slug}/${post.id}` : post.image ? picture(post.image) : undefined;
+export const UPDATE_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+export function updateDate(created: string) {
+  const date = new Date(created.replace(" ","T")+"Z");
+  return new Intl.DateTimeFormat("vi-VN",{dateStyle:"long",timeZone:"Asia/Ho_Chi_Minh"}).format(date);
+}
 export const publicBase = () => process.env.SITE_URL || "http://localhost:3100";

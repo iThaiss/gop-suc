@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { MapPin, Package } from "lucide-react";
 import { Give, GiveActions, GiveNeedButton, Share } from "../../../components/client";
 import { campaign, expenses, needs, publicGifts, updates } from "../../../lib/db";
-import { money, picture } from "../../../lib/domain";
+import { money, picture, updateDate, updatePicture } from "../../../lib/domain";
 
 export const dynamic = "force-dynamic";
 type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string;soLuong?:string}>};
@@ -44,10 +44,16 @@ export default async function CampaignPage({params,searchParams}:Props) {
           <div className="need-details"><div><p><b>{n.received}/{n.target} {n.unit} đã nhận</b> · {n.pledged} {n.unit} đã hẹn · còn nhận hẹn {Math.max(0,n.target-n.received-n.pledged)} {n.unit}</p><small>{n.handoff}</small></div>
             <GiveNeedButton id={n.id} name={n.name}/></div>
         </article>)}{!items.length && <p>Chiến dịch chưa công bố nhu cầu hiện vật.</p>}</section>
-        <section className="panel" id="nhat-ky"><h2>Nhật ký và ảnh bàn giao</h2>{posts.map(post=><article className="post" key={post.id} id={`cap-nhat-${post.id}`}>
-          {post.image && <div className="post-photo"><Image src={picture(post.image)} alt="Ảnh minh họa cập nhật" fill sizes="(max-width: 760px) 100vw, 55vw"/></div>}
-          <h3>{post.title}</h3><p>{post.body}</p><Share path={`/chien-dich/${c.slug}/cap-nhat/${post.id}`} title={post.title}/>
-        </article>)}{!posts.length && <p>Chưa có cập nhật.</p>}</section>
+        <section className="panel" id="nhat-ky"><h2>Nhật ký và ảnh bàn giao</h2>{posts.length>0 ? <ol className="post-timeline">{posts.map(post=>{
+          const photo=updatePicture(post);
+          const path=`/chien-dich/${c.slug}/cap-nhat/${post.id}`;
+          return <li className="post" key={post.id} id={`cap-nhat-${post.id}`}>
+            <time dateTime={post.created.replace(" ","T")+"Z"}>{updateDate(post.created)}</time>
+            <h3><Link href={path}>{post.title}</Link></h3>
+            {photo && <div className="post-photo"><Image src={photo} alt={post.hasPhoto?`Ảnh bàn giao: ${post.title}`:"Ảnh minh họa cập nhật"} fill sizes="(max-width: 760px) 100vw, 55vw"/></div>}
+            <p>{post.body}</p><Share path={path} title={post.title}/>
+          </li>;
+        })}</ol> : <p>Chưa có cập nhật từ ban tổ chức.</p>}</section>
       </div>
       <aside>
         <section className="panel" id="thu-chi"><h2>Thu chi công khai</h2><dl className="ledger"><div><dt>Đã nhận</dt><dd>{money(c.received)}</dd></div><div><dt>Đã chi</dt><dd>{money(c.spent)}</dd></div><div><dt>Còn lại</dt><dd>{money(c.received-c.spent)}</dd></div></dl>

@@ -7,8 +7,11 @@ import { FacebookShareButton } from "react-share";
 import { money, type Campaign, type Need, type Receipt } from "../lib/domain";
 import type { MatchResult } from "../lib/match";
 
-export async function api<T>(data: object, signal?: AbortSignal): Promise<T> {
-  const result = await fetch("/api/gopsuc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),signal});
+export async function api<T>(data: object | FormData, signal?: AbortSignal): Promise<T> {
+  const result = await fetch("/api/gopsuc",{
+    method:"POST", signal,
+    ...(data instanceof FormData ? {body:data} : {headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)}),
+  });
   const body = await result.json();
   if (!result.ok) throw new Error(body.error ?? "Yêu cầu chưa thành công.");
   return body as T;
