@@ -38,7 +38,7 @@ function CampaignFields({campaign}: {campaign?:Campaign}) {
 }
 
 export default async function Admin({searchParams}: {searchParams:Promise<{chien?:string;muc?:string;trang?:string}>}) {
-  const role=sessionRole((await cookies()).get(sessionCookie)?.value);
+  const role=await sessionRole((await cookies()).get(sessionCookie)?.value);
   if (!role) return <section className="shell narrow"><h1>Quản trị</h1><ActionForm action="login" label="Đăng nhập">
     <label>Vai trò<select name="role"><option value="organizer">Người tổ chức</option><option value="admin">Quản trị viên</option></select></label>
     <label>Mật khẩu<input name="password" type="password" required autoComplete="current-password"/></label>
@@ -46,19 +46,19 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
   </ActionForm></section>;
 
   const params=await searchParams;
-  const rows=campaigns(false).filter(c=>role==="admin"||c.owner===role);
+  const rows=(await campaigns(false)).filter(c=>role==="admin"||c.owner===role);
   const selected=rows.find(c=>c.slug===params.chien)??rows[0];
   const tab=(Object.keys(tabs) as Tab[]).find(key=>key===params.muc)??"overview";
-  const counts=pendingCounts();
+  const counts=await pendingCounts();
   const queued=rows.reduce((total,c)=>total+(counts.get(c.slug)??0),0);
   const count=selected ? counts.get(selected.slug)??0 : 0;
   const pages=Math.max(1,Math.ceil(count/GOODS_PAGE_SIZE));
   const page=Math.min(pages,Math.max(1,Math.floor(Number(params.trang)||1)));
-  const queue=selected&&tab==="handoff" ? pendingGoods(selected.slug,(page-1)*GOODS_PAGE_SIZE) : [];
-  const items=selected && tab==="overview" ? needs(selected.slug) : [];
-  const posts=selected && tab==="journal" ? updates(selected.slug) : [];
-  const bills=selected && tab==="journal" ? expenses(selected.slug) : [];
-  const shifts=selected && tab==="volunteer" ? volunteerShifts(selected.slug) : [];
+  const queue=selected&&tab==="handoff" ? await pendingGoods(selected.slug,(page-1)*GOODS_PAGE_SIZE) : [];
+  const items=selected && tab==="overview" ? await needs(selected.slug) : [];
+  const posts=selected && tab==="journal" ? await updates(selected.slug) : [];
+  const bills=selected && tab==="journal" ? await expenses(selected.slug) : [];
+  const shifts=selected && tab==="volunteer" ? await volunteerShifts(selected.slug) : [];
 
   return <div className="shell admin">
     <div className="section-head"><div><h1>Quản trị chiến dịch</h1><p>{role==="admin"?"Quản trị viên":"Người tổ chức"}</p></div><ActionForm action="logout" label="Đăng xuất" tone="secondary"/></div>

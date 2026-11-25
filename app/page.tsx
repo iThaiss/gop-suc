@@ -15,13 +15,13 @@ export default async function Home({searchParams}: {searchParams:Promise<{nhom?:
   const params = await searchParams;
   const category = categories.find(name => name === params.nhom) ?? "";
   const query = typeof params.q === "string" ? params.q.trim().slice(0, 90) : "";
-  const rows = campaigns();
+  const [rows,allNeeds] = await Promise.all([campaigns(),needs()]);
   const active = rows.filter(c => c.status === "active");
   const featured = active[0];
   const filtered = rows.filter(c => (!category || c.category === category) &&
     (!query || searchable([c.title, c.location, c.category].join(" ")).includes(searchable(query))));
   const total = rows.reduce((sum, c) => sum + c.received, 0);
-  const openNeeds = needs().filter(n => n.target > n.received + n.pledged);
+  const openNeeds = allNeeds.filter(n => n.target > n.received + n.pledged);
   const filterUrl = (name: string) => {
     const search = new URLSearchParams();
     if (name) search.set("nhom", name);

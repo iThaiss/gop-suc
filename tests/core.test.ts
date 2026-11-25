@@ -8,47 +8,47 @@ import { encodeUpdateImage } from "../lib/update-image.ts";
 process.env.DATABASE_FILE = ":memory:";
 const slug = "lop-hoc-sau-mua";
 
-test("tiền chỉ cộng sau xác nhận và xác nhận lặp không cộng hai lần", () => {
-  const before = campaign(slug)!.received;
-  const gift = contribute({slug,kind:"cash",amount:50_000});
-  assert.equal(campaign(slug)!.received,before);
-  assert.equal(confirmCash(gift.code).duplicate,false);
-  assert.equal(confirmCash(gift.code).duplicate,true);
-  assert.equal(campaign(slug)!.received,before+50_000);
-  assert.equal(publicGifts(slug)[0].name,"****");
-  assert.ok(!("name" in receipt(gift.code)!));
+test("tiền chỉ cộng sau xác nhận và xác nhận lặp không cộng hai lần", async () => {
+  const before = (await campaign(slug))!.received;
+  const gift = await contribute({slug,kind:"cash",amount:50_000});
+  assert.equal((await campaign(slug))!.received,before);
+  assert.equal((await confirmCash(gift.code)).duplicate,false);
+  assert.equal((await confirmCash(gift.code)).duplicate,true);
+  assert.equal((await campaign(slug))!.received,before+50_000);
+  assert.equal((await publicGifts(slug))[0].name,"****");
+  assert.ok(!("name" in (await receipt(gift.code))!));
 });
 
-test("hẹn giao không vượt mục tiêu và cho phép xác nhận số thực nhận", () => {
-  const item=needs(slug)[0];
-  assert.throws(()=>contribute({slug,kind:"goods",needId:item.id,amount:50}),/vượt quá/);
-  const gift=contribute({slug,kind:"goods",needId:item.id,amount:15});
-  assert.equal(needs(slug)[0].pledged,15);
-  assert.equal(needs(slug)[0].received,80);
-  assert.throws(()=>manage("organizer",slug,"receive",{code:gift.code,actual:16}),/vượt quá/);
-  manage("organizer",slug,"receive",{code:gift.code,actual:12});
-  assert.equal(needs(slug)[0].pledged,0);
-  assert.equal(needs(slug)[0].received,92);
-  assert.throws(()=>manage("organizer",slug,"receive",{code:gift.code,actual:12}),/đã xử lý/);
+test("hẹn giao không vượt mục tiêu và cho phép xác nhận số thực nhận", async () => {
+  const item=(await needs(slug))[0];
+  await assert.rejects(()=>contribute({slug,kind:"goods",needId:item.id,amount:50}),/vượt quá/);
+  const gift=await contribute({slug,kind:"goods",needId:item.id,amount:15});
+  assert.equal((await needs(slug))[0].pledged,15);
+  assert.equal((await needs(slug))[0].received,80);
+  await assert.rejects(()=>manage("organizer",slug,"receive",{code:gift.code,actual:16}),/vượt quá/);
+  await manage("organizer",slug,"receive",{code:gift.code,actual:12});
+  assert.equal((await needs(slug))[0].pledged,0);
+  assert.equal((await needs(slug))[0].received,92);
+  await assert.rejects(()=>manage("organizer",slug,"receive",{code:gift.code,actual:12}),/đã xử lý/);
 });
 
-test("phân quyền duyệt, ghi chi và đóng chiến dịch", () => {
-  manage("organizer","kiem-thu","create",{title:"Kiểm thử",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:200000});
-  assert.equal(campaign("kiem-thu")!.status,"draft");
+test("phân quyền duyệt, ghi chi và đóng chiến dịch", async () => {
+  await manage("organizer","kiem-thu","create",{title:"Kiểm thử",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:200000});
+  assert.equal((await campaign("kiem-thu"))!.status,"draft");
   const updated={title:"Tên đã sửa",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:300000};
-  manage("organizer","kiem-thu","editDraft",updated);
-  assert.equal(campaign("kiem-thu")!.title,"Tên đã sửa");
-  assert.equal(campaign("kiem-thu")!.goal,300000);
-  assert.throws(()=>manage("organizer","kiem-thu","publish",{}),/quản trị/);
-  assert.throws(()=>contribute({slug:"kiem-thu",kind:"cash",amount:5000}),/ngừng/);
-  manage("admin","kiem-thu","publish",{});
-  assert.throws(()=>manage("organizer","kiem-thu","editDraft",updated),/chờ duyệt/);
-  assert.throws(()=>manage("admin","kiem-thu","expense",{title:"A",amount:1,evidence:"B"}),/số dư/);
-  manage("admin","kiem-thu","close",{});
-  assert.throws(()=>contribute({slug:"kiem-thu",kind:"cash",amount:5000}),/ngừng/);
+  await manage("organizer","kiem-thu","editDraft",updated);
+  assert.equal((await campaign("kiem-thu"))!.title,"Tên đã sửa");
+  assert.equal((await campaign("kiem-thu"))!.goal,300000);
+  await assert.rejects(()=>manage("organizer","kiem-thu","publish",{}),/quản trị/);
+  await assert.rejects(()=>contribute({slug:"kiem-thu",kind:"cash",amount:5000}),/ngừng/);
+  await manage("admin","kiem-thu","publish",{});
+  await assert.rejects(()=>manage("organizer","kiem-thu","editDraft",updated),/chờ duyệt/);
+  await assert.rejects(()=>manage("admin","kiem-thu","expense",{title:"A",amount:1,evidence:"B"}),/số dư/);
+  await manage("admin","kiem-thu","close",{});
+  await assert.rejects(()=>contribute({slug:"kiem-thu",kind:"cash",amount:5000}),/ngừng/);
 });
 
-test("AI nhận dạng tiếng Việt và số còn nhận lấy từ cơ sở dữ liệu", () => {
+test("AI nhận dạng tiếng Việt và số còn nhận lấy từ cơ sở dữ liệu", async () => {
   const examples = new Map([
     ["Minh co 15 bo dung cu hoc tap cuoi tuan","learning"],
     ["Tôi có túi gạo 5 kg muốn gửi","food"],
@@ -57,12 +57,12 @@ test("AI nhận dạng tiếng Việt và số còn nhận lấy từ cơ sở d
     ["Mình có xà phòng và chổi","cleaning"],
   ]);
   for (const [query,topic] of examples) assert.equal(classify(query)[0]?.id,topic,query);
-  assert.equal(findMatches("bộ dụng cụ học tập",needs()).goods[0].available,28);
-  assert.equal(findMatches("tôi có một cây đàn piano",needs()).goods.length,0);
+  assert.equal(findMatches("bộ dụng cụ học tập",(await needs())).goods[0].available,28);
+  assert.equal(findMatches("tôi có một cây đàn piano",(await needs())).goods.length,0);
 });
 
-test("AI chỉ điền số lượng cùng đơn vị và không vượt sức nhận", () => {
-  const rows=needs();
+test("AI chỉ điền số lượng cùng đơn vị và không vượt sức nhận", async () => {
+  const rows=await needs();
   const school=(query:string)=>findMatches(query,rows).goods.find(n=>n.topic==="learning");
   assert.equal(school("Mình có 15 bộ dụng cụ học tập")?.suggested,15);
   const partial=school("Mình có 90 bộ dụng cụ học tập");
@@ -82,29 +82,29 @@ test("Ảnh cập nhật được nén, bỏ metadata và chỉ công khai sau k
   assert.equal(output.width,1280);
   assert.equal(output.exif,undefined);
   await assert.rejects(encodeUpdateImage(new File(["not a photo"],"fake.png",{type:"image/png"})),/Không đọc được ảnh/);
-  manage("organizer","thu-anh","create",{title:"Ảnh bàn giao",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:50000});
-  manage("organizer","thu-anh","update",{title:"Cập nhật",body:"Demo",image:"school"},photo);
-  const [post]=updates("thu-anh");
+  await manage("organizer","thu-anh","create",{title:"Ảnh bàn giao",description:"Demo",category:"Giáo dục",location:"Huế",cover:"school",goal:50000});
+  await manage("organizer","thu-anh","update",{title:"Cập nhật",body:"Demo",image:"school"},photo);
+  const [post]=(await updates("thu-anh"));
   assert.equal(post.hasPhoto,1);
   assert.equal(post.image,"");
-  assert.equal(publicUpdatePhoto("thu-anh",post.id),undefined);
-  manage("admin","thu-anh","publish",{});
-  assert.deepEqual(Buffer.from(publicUpdatePhoto("thu-anh",post.id)!),photo);
-  assert.equal(publicUpdatePhoto(slug,post.id),undefined);
+  assert.equal((await publicUpdatePhoto("thu-anh",post.id)),undefined);
+  await manage("admin","thu-anh","publish",{});
+  assert.deepEqual(Buffer.from((await publicUpdatePhoto("thu-anh",post.id))!),photo);
+  assert.equal((await publicUpdatePhoto(slug,post.id)),undefined);
 });
 
-test("giữ chỗ tình nguyện không vượt sức chứa và hủy để mở lại chỗ", () => {
+test("giữ chỗ tình nguyện không vượt sức chứa và hủy để mở lại chỗ", async () => {
   const local=new Date(Date.now()+48*3600_000).toISOString().slice(0,16);
   const fields={title:"Soạn hàng",location:"Điểm demo",startLocal:local,capacity:1};
-  manage("organizer",slug,"addShift",fields);
-  const shift=volunteerShifts(slug).find(item=>item.title===fields.title)!;
+  await manage("organizer",slug,"addShift",fields);
+  const shift=(await volunteerShifts(slug)).find(item=>item.title===fields.title)!;
   assert.equal(shift.startsAt,new Date(local+":00+07:00").toISOString());
-  const booking=bookVolunteer(slug,shift.id);
-  assert.equal(volunteerBooking(booking.code)?.status,"booked");
-  assert.throws(()=>bookVolunteer(slug,shift.id),/đủ người/);
-  assert.throws(()=>bookVolunteer("bep-am-cuoi-tuan",shift.id),/không còn mở/);
-  assert.equal(cancelVolunteer(booking.code).status,"cancelled");
-  assert.equal(cancelVolunteer(booking.code).status,"cancelled");
-  assert.equal(bookVolunteer(slug,shift.id).status,"booked");
-  assert.throws(()=>manage("organizer",slug,"addShift",{...fields,startLocal:"2025-02-30T12:00"}),/tương lai/);
+  const booking=await bookVolunteer(slug,shift.id);
+  assert.equal((await volunteerBooking(booking.code))?.status,"booked");
+  await assert.rejects(()=>bookVolunteer(slug,shift.id),/đủ người/);
+  await assert.rejects(()=>bookVolunteer("bep-am-cuoi-tuan",shift.id),/không còn mở/);
+  assert.equal((await cancelVolunteer(booking.code)).status,"cancelled");
+  assert.equal((await cancelVolunteer(booking.code)).status,"cancelled");
+  assert.equal((await bookVolunteer(slug,shift.id)).status,"booked");
+  await assert.rejects(()=>manage("organizer",slug,"addShift",{...fields,startLocal:"2025-02-30T12:00"}),/tương lai/);
 });

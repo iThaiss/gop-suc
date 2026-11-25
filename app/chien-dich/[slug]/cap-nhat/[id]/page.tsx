@@ -9,9 +9,9 @@ import { Share } from "../../../../../components/client";
 export const dynamic = "force-dynamic";
 type Props={params:Promise<{slug:string;id:string}>};
 async function load(params:Props["params"]) {
-  const {slug,id}=await params, c=campaign(slug);
+  const {slug,id}=await params, c=await campaign(slug);
   if (!c || c.status==="draft") notFound();
-  const post=updates(slug).find(row=>String(row.id)===id);
+  const post=(await updates(slug)).find(row=>String(row.id)===id);
   if (!post) notFound();
   return {c,post,path:`/chien-dich/${slug}/cap-nhat/${id}`};
 }

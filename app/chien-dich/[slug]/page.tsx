@@ -11,17 +11,17 @@ import { money, picture, updateDate, updatePicture } from "../../../lib/domain";
 export const dynamic = "force-dynamic";
 type Props={params:Promise<{slug:string}>;searchParams:Promise<{mon?:string;soLuong?:string}>};
 export async function generateMetadata({params}:Props):Promise<Metadata> {
-  const c=campaign((await params).slug);
+  const c=await campaign((await params).slug);
   if (!c || c.status==="draft") return {};
   const url=`/chien-dich/${c.slug}`;
   return {title:c.title,description:c.description,alternates:{canonical:url},openGraph:{title:c.title,description:c.description,url,images:[{url:picture(c.cover),alt:c.title}]}};
 }
 export default async function CampaignPage({params,searchParams}:Props) {
-  const c=campaign((await params).slug);
+  const c=await campaign((await params).slug);
   if (!c || c.status==="draft") notFound();
   const {mon,soLuong}=await searchParams;
-  const items=needs(c.slug), posts=updates(c.slug), bills=expenses(c.slug), gifts=publicGifts(c.slug);
-  const shifts=volunteerShifts(c.slug).filter(shift=>Date.parse(shift.startsAt)>Date.now());
+  const [items,posts,bills,gifts,allShifts]=await Promise.all([needs(c.slug),updates(c.slug),expenses(c.slug),publicGifts(c.slug),volunteerShifts(c.slug)]);
+  const shifts=allShifts.filter(shift=>Date.parse(shift.startsAt)>Date.now());
   const percent=Math.min(100,Math.floor(c.received/c.goal*100));
   return <Give campaign={{slug:c.slug,title:c.title,status:c.status}} needs={items.map(item=>({...item}))}
     initialNeed={typeof mon==="string" && /^[1-9]\d{0,14}$/.test(mon) ? Number(mon) : undefined}

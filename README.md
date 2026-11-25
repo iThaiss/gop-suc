@@ -15,6 +15,12 @@ Mở [localhost:3100](http://localhost:3100). Ở **Trang quản trị**, dùng 
 
 SQLite tạo dữ liệu mẫu ở `.data/gopsuc.sqlite` trong lần chạy đầu. Để có dữ liệu demo mới mà vẫn giữ lần chạy trước, đặt `DATABASE_FILE` thành đường dẫn đến một tệp SQLite mới. Dùng ổ đĩa bền vững nếu host. Với địa chỉ HTTPS hoặc khi truy cập từ máy khác, đặt `SITE_URL` đúng địa chỉ dùng để mở web. QR chỉ mở phiếu demo. Website không kết nối ngân hàng hay nhận tiền thật.
 
+### Triển khai Vercel và Supabase
+
+Tạo project Supabase riêng cho đồ án và áp dụng migration trong `supabase/migrations`. Migration nạp ba chiến dịch mẫu vào schema riêng. Cấu hình mật khẩu cho role máy chủ `gopsuc_runtime` và dùng URL Transaction Pooler của chính role đó trong `DATABASE_URL`. Giữ URL này trong biến môi trường máy chủ. Role không có quyền quản trị cơ sở dữ liệu.
+
+Trong project Vercel, thêm `DATABASE_URL`, `SITE_URL` (địa chỉ HTTPS chính thức), `ADMIN_PASSWORD` và `ORGANIZER_PASSWORD` vào môi trường Production. Bản chạy trên Vercel yêu cầu PostgreSQL. Bản chạy trên máy vẫn dùng SQLite nếu không đặt `DATABASE_URL`. Chạy `node scripts/check-hosted-db.mjs` để kiểm tra đọc, ghi và các luồng nghiệp vụ trên PostgreSQL. Các bản ghi kiểm tra nằm trong một giao dịch hoàn tác.
+
 ## Cách hệ thống hoạt động
 
 Để tập bảo vệ với dữ liệu mẫu mới, chạy `npm run build` rồi `npm run preview:clean` và mở [127.0.0.1:3101](http://127.0.0.1:3101). Mỗi lần khởi động tạo một tệp SQLite riêng và giữ dữ liệu đang dùng ở cổng 3100. Nếu cần dùng trang quản trị ở bản dựng này, đặt mật khẩu theo hướng dẫn production ở trên.

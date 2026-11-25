@@ -2,6 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+import pg from "pg";
+import { postgresConfig } from "./postgres-config.ts";
 import type { Campaign, Need, Update, Expense, Receipt, Role, VolunteerShift, VolunteerBooking } from "./domain.ts";
 
 let connection: DatabaseSync | undefined;
@@ -10,7 +13,8 @@ const campaignFields = `c.*, COALESCE((SELECT SUM(amount) FROM receipts WHERE sl
   COALESCE((SELECT SUM(amount) FROM expenses WHERE slug=c.slug),0) AS spent`;
 const receiptFields = "r.code,r.slug,r.kind,r.amount,r.status,r.actual,r.needId,n.name AS needName,n.unit,n.handoff";
 
-export function db() {
+function sqlite() {
+  if (process.env.VERCEL==="1") throw new Error("DATABASE_URL is required on Vercel.");
   if (connection) return connection;
   const path = process.env.DATABASE_FILE || resolve(".data/gopsuc.sqlite");
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -73,6 +77,61 @@ export function db() {
   return database;
 }
 
+type Value = string | number | Uint8Array | null;
+type Row = Record<string, unknown>;
+type Executor = (sql:string,values:Value[])=>Promise<Row[]>;
+const transactionContext = new AsyncLocalStorage<Executor>();
+let pool: pg.Pool | undefined;
+let queue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(work:()=>Promise<T>):Promise<T> {
+  const next=queue.then(work,work);
+  queue=next.catch(()=>undefined);
+  return next;
+}
+
+const sqliteExecute:Executor = async (sql,values) => {
+  const stmt=sqlite().prepare(sql);
+  if (/^\s*(select|with)\b|\breturning\b/i.test(sql)) return stmt.all(...values);
+  stmt.run(...values);
+  return [];
+};
+
+function pgPool() {
+  if (!pool) {
+    pool=new pg.Pool({...postgresConfig(process.env.DATABASE_URL!),max:3,idleTimeoutMillis:15000});
+    pool.on("error",()=>console.error("Góp Sức database pool connection was interrupted."));
+  }
+  return pool;
+}
+
+function postgres(peer: Pick<pg.PoolClient,"query">):Executor {
+  return async (sql,values) => {
+    let bind=0;
+    const statement=sql.replace(/\?/g,()=>"$"+ ++bind)
+      .replace(/c\.rowid/g,"c.position").replace(/\b(r\.)?rowid\b/g,"$1sequence")
+      .replace(/\b(FROM|JOIN|INTO|UPDATE) (campaigns|needs|receipts|expenses|updates|update_photos|volunteer_shifts|volunteer_bookings|sessions|limits)\b/gi,"$1 gopsuc.$2");
+    const {rows}=await peer.query(statement,values.map(v=>v instanceof Uint8Array ? Buffer.from(v) : v));
+    return rows.map(row=>{
+      const columns: Record<string,string>={needid:"needId",needname:"needName",hasphoto:"hasPhoto",startsat:"startsAt"};
+      return Object.fromEntries(Object.entries(row).map(([key,value])=>[
+        columns[key]??key, ["received","spent","pledged","count","reserved","hasphoto"].includes(key)?Number(value):value,
+      ]));
+    });
+  };
+}
+
+export async function all<T = Row>(sql:string,...values:Value[]):Promise<T[]> {
+  const active=transactionContext.getStore();
+  if (active) return await active(sql,values) as T[];
+  if (process.env.DATABASE_URL) return await postgres(pgPool())(sql,values) as T[];
+  return await serialize(()=>sqliteExecute(sql,values)) as T[];
+}
+
+export async function get<T = Row>(sql:string,...values:Value[]):Promise<T | undefined> {
+  return (await all<T>(sql,...values))[0];
+}
+
 function seed(d: DatabaseSync) {
   const add = d.prepare("INSERT INTO campaigns VALUES(?,?,?,?,?,?,?,'active','organizer')");
   add.run("lop-hoc-sau-mua", "Góp lại lớp học sau mùa mưa", "Cùng sửa phòng học và chuẩn bị đồ dùng để một điểm trường miền núi có thể đón học sinh trở lại. Các khoản chi và mốc bàn giao được cập nhật công khai.", "Giáo dục", "Quảng Nam", "school", 60_000_000);
@@ -92,133 +151,149 @@ function seed(d: DatabaseSync) {
   d.prepare("INSERT INTO updates(slug,title,body,image) VALUES(?,?,?,?)").run("lop-hoc-sau-mua","Đã nhận 80 bộ dụng cụ học tập","Ban tổ chức đã kiểm đếm và đóng gói 80 bộ. Điểm nhận vẫn mở vào sáng thứ bảy theo lịch đăng trên trang.", "school");
 }
 
-export const campaigns = (publicOnly = true) => db().prepare(`SELECT ${campaignFields} FROM campaigns c ${publicOnly ? "WHERE status!='draft'" : ""} ORDER BY c.rowid`).all() as unknown as Campaign[];
-export const campaign = (slug: string) => db().prepare(`SELECT ${campaignFields} FROM campaigns c WHERE slug=?`).get(slug) as Campaign | undefined;
-export const needs = (slug?: string) => db().prepare(`
+export const campaigns = (publicOnly = true) => all<Campaign>(`SELECT ${campaignFields} FROM campaigns c ${publicOnly ? "WHERE status!='draft'" : ""} ORDER BY c.rowid`)
+export const campaign = (slug: string) => get<Campaign>(`SELECT ${campaignFields} FROM campaigns c WHERE slug=?`,slug)
+export const needs = (slug?: string) => all<Need>(`
   SELECT n.*, COALESCE(SUM(CASE WHEN r.status='confirmed' THEN r.actual ELSE 0 END),0) AS received,
   COALESCE(SUM(CASE WHEN r.status='pending' THEN r.amount ELSE 0 END),0) AS pledged
   FROM needs n JOIN campaigns c ON c.slug=n.slug LEFT JOIN receipts r ON r.needId=n.id
-  WHERE ${slug ? "n.slug=?" : "c.status='active'"} GROUP BY n.id ORDER BY n.id`).all(...(slug ? [slug] : [])) as unknown as Need[];
-export const updates = (slug: string) => db().prepare("SELECT u.*,EXISTS(SELECT 1 FROM update_photos p WHERE p.updateId=u.id) AS hasPhoto FROM updates u WHERE slug=? ORDER BY id DESC").all(slug) as unknown as Update[];
-export const publicUpdatePhoto = (slug: string, id: number) => db().prepare(`
+  WHERE ${slug ? "n.slug=?" : "c.status='active'"} GROUP BY n.id ORDER BY n.id`,...(slug ? [slug] : []))
+export const updates = (slug: string) => all<Update>("SELECT u.*,EXISTS(SELECT 1 FROM update_photos p WHERE p.updateId=u.id) AS hasPhoto FROM updates u WHERE slug=? ORDER BY id DESC",slug)
+export const publicUpdatePhoto = async (slug: string, id: number) => (await get<{image:Uint8Array}>(`
   SELECT p.image FROM update_photos p JOIN updates u ON u.id=p.updateId JOIN campaigns c ON c.slug=u.slug
   WHERE u.slug=? AND u.id=? AND c.status!='draft'
-`).get(slug,id)?.image as Uint8Array | undefined;
-export const expenses = (slug: string) => db().prepare("SELECT id,title,amount,evidence,created FROM expenses WHERE slug=? ORDER BY id DESC").all(slug) as unknown as Expense[];
-export const publicGifts = (slug: string) => db().prepare("SELECT COALESCE(name,'****') AS name,amount,note FROM receipts WHERE slug=? AND kind='cash' AND status='confirmed' ORDER BY rowid DESC LIMIT 8").all(slug) as unknown as {name:string;amount:number;note:string|null}[];
-export const receipt = (code: string) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.code=?`).get(code) as Receipt | undefined;
+`,slug,id))?.image;
+export const expenses = (slug: string) => all<Expense>("SELECT id,title,amount,evidence,created FROM expenses WHERE slug=? ORDER BY id DESC",slug)
+export const publicGifts = (slug: string) => all<{name:string;amount:number;note:string|null}>("SELECT COALESCE(name,'****') AS name,amount,note FROM receipts WHERE slug=? AND kind='cash' AND status='confirmed' ORDER BY rowid DESC LIMIT 8",slug)
+export const receipt = (code: string) => get<Receipt>(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.code=?`,code)
 export const GOODS_PAGE_SIZE = 15;
-export const pendingGoods = (slug: string, offset = 0) => db().prepare(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.slug=? AND r.status='pending' AND r.kind='goods' ORDER BY r.rowid DESC LIMIT ? OFFSET ?`).all(slug, GOODS_PAGE_SIZE, offset) as unknown as Receipt[];
-export const pendingCounts = () => new Map(db().prepare("SELECT slug, COUNT(*) AS count FROM receipts WHERE kind='goods' AND status='pending' GROUP BY slug").all().map(row => [String(row.slug), Number(row.count)]));
-export const volunteerShifts = (slug: string) => db().prepare(`
+export const pendingGoods = (slug: string, offset = 0) => all<Receipt>(`SELECT ${receiptFields} FROM receipts r LEFT JOIN needs n ON n.id=r.needId WHERE r.slug=? AND r.status='pending' AND r.kind='goods' ORDER BY r.rowid DESC LIMIT ? OFFSET ?`,slug, GOODS_PAGE_SIZE, offset)
+export const pendingCounts = async () => new Map((await all<{slug:string;count:number}>("SELECT slug, COUNT(*) AS count FROM receipts WHERE kind='goods' AND status='pending' GROUP BY slug")).map(row => [row.slug,row.count]));
+export const volunteerShifts = (slug: string) => all<VolunteerShift>(`
   SELECT s.*, (SELECT COUNT(*) FROM volunteer_bookings b WHERE b.shiftId=s.id AND b.status='booked') AS reserved
   FROM volunteer_shifts s WHERE s.slug=? ORDER BY s.startsAt,s.id
-`).all(slug) as unknown as VolunteerShift[];
-export const volunteerBooking = (code: string) => db().prepare(`
+`,slug)
+export const volunteerBooking = (code: string) => get<VolunteerBooking>(`
   SELECT b.code,s.slug,s.title,s.location,s.startsAt,b.status
   FROM volunteer_bookings b JOIN volunteer_shifts s ON s.id=b.shiftId WHERE b.code=?
-`).get(code) as VolunteerBooking | undefined;
-
+`,code)
 export class RuleError extends Error {}
 
-function transaction<T>(action: (d: DatabaseSync) => T) {
-  const d = db();
-  d.exec("BEGIN IMMEDIATE");
-  try {
-    const result = action(d);
-    d.exec("COMMIT");
-    return result;
-  } catch (error) {
-    d.exec("ROLLBACK");
-    throw error;
+export async function transaction<T>(action:()=>Promise<T>):Promise<T> {
+  if (transactionContext.getStore()) return action();
+  if (process.env.DATABASE_URL) {
+    const peer=await pgPool().connect();
+    try {
+      await peer.query("BEGIN");
+      await peer.query("SELECT pg_advisory_xact_lock(42870519)");
+      const result=await transactionContext.run(postgres(peer),action);
+      await peer.query("COMMIT");
+      return result;
+    } catch (error) {
+      await peer.query("ROLLBACK").catch(()=>undefined);
+      throw error;
+    } finally {
+      peer.release();
+    }
   }
+  return serialize(async ()=>{
+    const d=sqlite();
+    d.exec("BEGIN IMMEDIATE");
+    try {
+      const result=await transactionContext.run(sqliteExecute,action);
+      d.exec("COMMIT");
+      return result;
+    } catch(error) {
+      d.exec("ROLLBACK");
+      throw error;
+    }
+  });
 }
 
 export function contribute(input: {slug:string;kind:"cash"|"goods";amount:number;needId?:number;name?:string;note?:string}) {
-  return transaction((d) => {
-    if (campaign(input.slug)?.status !== "active") throw new RuleError("Chiến dịch đã ngừng nhận đóng góp.");
+  return transaction(async ()=>{
+    if ((await campaign(input.slug))?.status !== "active") throw new RuleError("Chiến dịch đã ngừng nhận đóng góp.");
     let needId: number | null = null;
     if (input.kind === "goods") {
-      const need = needs(input.slug).find((item) => item.id === input.needId);
+      const need = (await needs(input.slug)).find((item) => item.id === input.needId);
       if (!need || input.amount > need.target - need.received - need.pledged) throw new RuleError("Số lượng vượt quá phần còn có thể đăng ký.");
       needId = need.id;
     }
     const code = randomBytes(16).toString("hex");
-    d.prepare("INSERT INTO receipts(code,slug,kind,amount,needId,name,note) VALUES(?,?,?,?,?,?,?)").run(code,input.slug,input.kind,input.amount,needId,input.name || null,input.note || null);
-    return receipt(code)!;
+    await all("INSERT INTO receipts(code,slug,kind,amount,needId,name,note) VALUES(?,?,?,?,?,?,?)",code,input.slug,input.kind,input.amount,needId,input.name || null,input.note || null);
+    return (await receipt(code))!;
   });
 }
 
 export function confirmCash(code: string) {
-  return transaction((d) => {
-    const previous = receipt(code);
+  return transaction(async ()=>{
+    const previous = await receipt(code);
     if (!previous || previous.kind !== "cash") throw new RuleError("Mã giao dịch không hợp lệ.");
-    const change = d.prepare("UPDATE receipts SET status='confirmed', actual=amount WHERE code=? AND status='pending'").run(code);
-    return { receipt: receipt(code)!, duplicate: !change.changes };
+    const change = await get("UPDATE receipts SET status='confirmed', actual=amount WHERE code=? AND status='pending' RETURNING code",code);
+    return { receipt: (await receipt(code))!, duplicate: !change };
   });
 }
 
 export function bookVolunteer(slug: string, id: number) {
-  return transaction(d=>{
-    if (campaign(slug)?.status!=="active") throw new RuleError("Chiến dịch đã ngừng nhận đăng ký.");
-    const shift=volunteerShifts(slug).find(row=>row.id===id);
+  return transaction(async ()=>{
+    if ((await campaign(slug))?.status!=="active") throw new RuleError("Chiến dịch đã ngừng nhận đăng ký.");
+    const shift=(await volunteerShifts(slug)).find(row=>row.id===id);
     if (!shift || Date.parse(shift.startsAt)<=Date.now()) throw new RuleError("Ca này đã qua hoặc không còn mở.");
     if (shift.reserved>=shift.capacity) throw new RuleError("Ca này đã đủ người.");
     const code=randomBytes(16).toString("hex");
-    d.prepare("INSERT INTO volunteer_bookings VALUES(?,?,'booked')").run(code,id);
-    return volunteerBooking(code)!;
+    await all("INSERT INTO volunteer_bookings VALUES(?,?,'booked')",code,id);
+    return (await volunteerBooking(code))!;
   });
 }
 
 export function cancelVolunteer(code: string) {
-  return transaction(d=>{
-    const booking=volunteerBooking(code);
+  return transaction(async ()=>{
+    const booking=await volunteerBooking(code);
     if (!booking) throw new RuleError("Không tìm thấy phiếu tình nguyện.");
     if (booking.status==="cancelled") return booking;
     if (Date.parse(booking.startsAt)<=Date.now()) throw new RuleError("Ca đã bắt đầu và không thể hủy.");
-    d.prepare("UPDATE volunteer_bookings SET status='cancelled' WHERE code=?").run(code);
-    return volunteerBooking(code)!;
+    await all("UPDATE volunteer_bookings SET status='cancelled' WHERE code=?",code);
+    return (await volunteerBooking(code))!;
   });
 }
 
 export function manage(role: Role, slug: string, action: string, input: Record<string, string | number>, photo?: Uint8Array) {
-  return transaction((d) => {
-    const c = campaign(slug);
+  return transaction(async ()=>{
+    const c = await campaign(slug);
     if (action === "create") {
       if (c) throw new RuleError("Mã chiến dịch đã tồn tại.");
-      d.prepare("INSERT INTO campaigns VALUES(?,?,?,?,?,?,?,'draft',?)").run(slug,input.title,input.description,input.category,input.location,input.cover,input.goal,role);
+      await all("INSERT INTO campaigns(slug,title,description,category,location,cover,goal,status,owner) VALUES(?,?,?,?,?,?,?,'draft',?)",slug,input.title,input.description,input.category,input.location,input.cover,input.goal,role);
       return;
     }
     if (!c || (role !== "admin" && c.owner !== role)) throw new RuleError("Bạn không có quyền với chiến dịch này.");
     if (action === "editDraft") {
       if (c.status !== "draft") throw new RuleError("Chỉ chỉnh sửa được chiến dịch đang chờ duyệt.");
-      d.prepare("UPDATE campaigns SET title=?,description=?,category=?,location=?,cover=?,goal=? WHERE slug=?")
-        .run(input.title,input.description,input.category,input.location,input.cover,input.goal,slug);
+      await all("UPDATE campaigns SET title=?,description=?,category=?,location=?,cover=?,goal=? WHERE slug=?",input.title,input.description,input.category,input.location,input.cover,input.goal,slug);
     } else if (action === "publish" || action === "close") {
       if (role !== "admin") throw new RuleError("Cần quyền quản trị.");
       if ((action === "publish" && c.status !== "draft") || (action === "close" && c.status !== "active")) throw new RuleError("Trạng thái hiện tại không cho phép thao tác này.");
-      d.prepare("UPDATE campaigns SET status=? WHERE slug=?").run(action === "publish" ? "active" : "closed",slug);
+      await all("UPDATE campaigns SET status=? WHERE slug=?",action === "publish" ? "active" : "closed",slug);
     } else if (action==="addShift") {
       const date=String(input.startLocal);
       const start=new Date(date+":00+07:00");
       const local=Number.isFinite(start.getTime()) ? new Date(start.getTime()+7*3600_000).toISOString().slice(0,16) : "";
       if (c.status==="closed" || local!==date || start.getTime()<=Date.now()) throw new RuleError("Chọn thời gian ca trong tương lai.");
-      d.prepare("INSERT INTO volunteer_shifts(slug,title,location,startsAt,capacity) VALUES(?,?,?,?,?)").run(slug,input.title,input.location,start.toISOString(),input.capacity);
+      await all("INSERT INTO volunteer_shifts(slug,title,location,startsAt,capacity) VALUES(?,?,?,?,?)",slug,input.title,input.location,start.toISOString(),input.capacity);
     } else if (action === "need") {
       if (c.status === "closed") throw new RuleError("Chiến dịch đã đóng.");
-      d.prepare("INSERT INTO needs(slug,name,unit,target,handoff,topic) VALUES(?,?,?,?,?,?)").run(slug,input.name,input.unit,input.target,input.handoff,input.topic);
+      await all("INSERT INTO needs(slug,name,unit,target,handoff,topic) VALUES(?,?,?,?,?,?)",slug,input.name,input.unit,input.target,input.handoff,input.topic);
     } else if (action === "update") {
-      const post = d.prepare("INSERT INTO updates(slug,title,body,image) VALUES(?,?,?,?)").run(slug,input.title,input.body,photo ? "" : input.image);
-      if (photo) d.prepare("INSERT INTO update_photos VALUES(?,?)").run(post.lastInsertRowid,photo);
+      const post = (await get<{id:number}>("INSERT INTO updates(slug,title,body,image) VALUES(?,?,?,?) RETURNING id",slug,input.title,input.body,photo ? "" : input.image))!;
+      if (photo) await all("INSERT INTO update_photos VALUES(?,?)",post.id,photo);
     } else if (action === "expense") {
       if (role !== "admin") throw new RuleError("Cần quyền quản trị để ghi khoản chi đã duyệt.");
       if (Number(input.amount) > c.received - c.spent) throw new RuleError("Khoản chi vượt quá số dư.");
-      d.prepare("INSERT INTO expenses(slug,title,amount,evidence) VALUES(?,?,?,?)").run(slug,input.title,input.amount,input.evidence);
+      await all("INSERT INTO expenses(slug,title,amount,evidence) VALUES(?,?,?,?)",slug,input.title,input.amount,input.evidence);
     } else if (action === "receive" || action === "cancel") {
-      const gift = receipt(String(input.code));
+      const gift = await receipt(String(input.code));
       if (!gift || gift.slug !== slug || gift.kind !== "goods" || gift.status !== "pending") throw new RuleError("Phiếu đã xử lý hoặc không hợp lệ.");
       if (action === "receive" && Number(input.actual) > gift.amount) throw new RuleError("Số thực nhận không thể vượt quá số đã hẹn.");
-      d.prepare("UPDATE receipts SET status=?,actual=? WHERE code=?").run(action === "receive" ? "confirmed" : "cancelled",action === "receive" ? input.actual : null,gift.code);
+      await all("UPDATE receipts SET status=?,actual=? WHERE code=?",action === "receive" ? "confirmed" : "cancelled",action === "receive" ? input.actual : null,gift.code);
     } else throw new RuleError("Thao tác không hợp lệ.");
   });
 }
