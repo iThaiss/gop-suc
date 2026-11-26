@@ -23,6 +23,7 @@ Góp Sức giúp người dùng tìm việc cộng đồng phù hợp, góp **ti
 | --- | --- |
 | “Mình có 15 bộ dụng cụ học tập ở Quảng Nam và muốn phụ đóng gói.” | Trên bản tập thử mới, hiện nhu cầu dụng cụ học tập, điền trước 15 bộ và gợi ý ca đóng gói. Trên bản công khai, ca chỉ hiện nếu vẫn còn chỗ và chưa tới giờ. |
 | “Mình muốn phụ đóng gói tuần sau.” | Yêu cầu làm rõ ngày hoặc buổi; không tự nới điều kiện để đưa một ca bất kỳ. |
+| “Mình có 15 bộ dụng cụ học tập ở Huế.” | Nếu không có nơi nhận khớp tại Huế nhưng có ở nơi khác, hiện nút **Tìm không giới hạn khu vực**. Chỉ khi bấm nút, trợ lý mới bỏ khu vực cho nhóm đồ dùng học tập; số lượng và đơn vị được giữ nguyên. Có thể quay về điều kiện ban đầu. |
 | “Mình có một cây đàn piano.” | Không ép khớp với món đang nhận. Có thể sửa yêu cầu hoặc quay về danh sách chiến dịch. |
 
 Đây là xử lý tiếng Việt theo phạm vi hẹp, không phải chatbot tạo sinh. Câu hỏi không chuyển sang nhà cung cấp AI khác. Gợi ý hiện vật bị giới hạn theo đơn vị và số lượng còn nhận. Máy chủ vẫn kiểm tra sức nhận lúc bấm gửi, vì số chỗ có thể thay đổi sau khi trợ lý trả lời. Bản nháp nhật ký lấy từ số liệu có sẵn; không tự công bố hay suy diễn đã bàn giao cho người thụ hưởng.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assistMatches, emptyAssistFilters, parseAssist, validDay } from "../lib/assist.ts";
+import { alternativeFilters, assistMatches, emptyAssistFilters, parseAssist, resolveAssist, validDay } from "../lib/assist.ts";
 import type { Campaign, Need, VolunteerShift } from "../lib/domain.ts";
 
 const now=Date.parse("2026-11-25T02:00:00.000Z");
@@ -73,4 +73,49 @@ test("không thả lỏng lịch khi chưa làm rõ và dùng điều kiện đ�
   assert.equal(assistMatches(intent.filters,[c],[],slots,now,intent.needsTime).volunteer.length,0);
   const edited={...emptyAssistFilters,modes:["volunteer" as const],date:"2026-11-29"};
   assert.deepEqual(assistMatches(edited,[c],[],slots,now).volunteer.map(item=>item.id),[2]);
+});
+
+test("chỉ gợi ý bỏ khu vực khi có đúng nhóm và đơn vị ở nơi khác",()=>{
+  const {filters}=parse("Mình có 15 bộ dụng cụ học tập và 3 chiếc chăn ở Quảng Nam");
+  const blanket={...need(other,20,"chiếc"),topic:"blankets" as const};
+  const rows=[need(school,1,"quyển"),need(other,2),need(closed,3),blanket];
+  const result=resolveAssist(filters,[school,other,closed],rows,[],now);
+  assert.deepEqual(result.goods,[]);
+  assert.deepEqual(result.gaps.map(gap=>[gap.topic,gap.reason,gap.alternatives.map(option=>option.change)]),[
+    ["learning","unit",["area"]],["blankets","unavailable",["area"]],
+  ]);
+  const alternate=alternativeFilters(filters,result.gaps[0].alternatives[0]);
+  assert.equal(alternate.location,"");
+  assert.deepEqual(alternate.items,[{topic:"learning",quantity:15,unit:"bộ"}]);
+  assert.deepEqual(resolveAssist(alternate,[school,other,closed],rows,[],now).goods.map(({id,suggested})=>[id,suggested]),[[2,8]]);
+  assert.equal(filters.location,"Quảng Nam");
+  assert.deepEqual(resolveAssist(filters,[school,closed],[need(school,1,"quyển"),need(closed,3)],[],now).gaps[0].alternatives,[]);
+});
+
+test("nhiều kết quả cùng nhóm không lấp mất kết quả hoặc thông báo của nhóm khác",()=>{
+  const {filters}=parse("Mình có gạo, chăn bông và 15 bộ dụng cụ học tập ở Quảng Nam");
+  const learning=Array.from({length:7},(_,i)=>({...need(school,i+1),target:100-i}));
+  const blankets={...need(school,20,"chiếc"),topic:"blankets" as const};
+  const result=resolveAssist(filters,[school],[...learning,blankets],[],now);
+  assert.equal(result.goods.length,5);
+  assert.deepEqual(result.goods.slice(0,2).map(item=>item.topic),["learning","blankets"]);
+  assert.deepEqual(result.gaps.map(gap=>gap.topic),["food"]);
+});
+
+test("chỉ gợi ý lịch hoặc công việc khác nếu đổi riêng điều kiện đó là đủ",()=>{
+  const {filters}=parse("Tôi muốn phụ đóng gói sáng Chủ nhật ở Quảng Nam");
+  const saturday=shift(1,"2026-11-28T02:00:00Z"), otherTask=shift(2,"2026-11-29T02:00:00Z",{title:"Dọn vệ sinh"});
+  const elsewhere=shift(3,"2026-11-29T02:00:00Z",{slug:other.slug,reserved:5});
+  const result=resolveAssist(filters,[school,other,closed],[],[saturday,otherTask,elsewhere],now);
+  assert.deepEqual(result.volunteer,[]);
+  assert.deepEqual(result.gaps[0].alternatives.map(item=>item.change),["schedule","role"]);
+  const schedule=alternativeFilters(filters,result.gaps[0].alternatives[0]);
+  assert.equal(schedule.role,"đóng gói");
+  assert.equal(schedule.location,"Quảng Nam");
+  assert.deepEqual(resolveAssist(schedule,[school,other],[],[saturday,otherTask,elsewhere],now).volunteer.map(item=>item.id),[1]);
+  const role=alternativeFilters(filters,result.gaps[0].alternatives[1]);
+  assert.equal(role.day,"sun");
+  assert.equal(role.part,"morning");
+  assert.deepEqual(resolveAssist(role,[school,other],[],[saturday,otherTask,elsewhere],now).volunteer.map(item=>item.id),[2]);
+  assert.deepEqual(resolveAssist(filters,[school],[],[saturday],now,true).gaps,[]);
 });

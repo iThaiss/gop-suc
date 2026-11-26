@@ -6,7 +6,7 @@ import { categories, covers } from "../../../lib/domain";
 import { bookVolunteer, campaign, campaignImpact, campaigns, cancelVolunteer, confirmCash, contribute, all, get, manage, needs, receipt, recordExpense, ReceiptAccessError, RuleError, volunteerBooking, volunteerShifts } from "../../../lib/db";
 import { receiptPath } from "../../../lib/receipt-access";
 import { findMatches, topics } from "../../../lib/match";
-import { assistMatches, days, giveModes, goodsTopics, parseAssist, parts, units, validDay } from "../../../lib/assist";
+import { days, giveModes, goodsTopics, parseAssist, parts, resolveAssist, units, validDay } from "../../../lib/assist";
 import { hash, sessionCookie as cookie, sessionRole } from "../../../lib/session";
 import { encodeUpdateImage, readPhotoForm, UploadError } from "../../../lib/update-image";
 
@@ -138,13 +138,14 @@ export async function POST(request: NextRequest) {
       case "match": return json(findMatches(input.query,await needs()));
       case "assist": {
         const active=(await campaigns()).filter(campaign=>campaign.status==="active");
-        const interpreted=input.input.source==="query" ? parseAssist(input.input.query,active.map(campaign=>campaign.location)) : {filters:input.input.filters,notes:[],needsTime:false};
+        const now=Date.now();
+        const interpreted=input.input.source==="query" ? parseAssist(input.input.query,active.map(campaign=>campaign.location),now) : {filters:input.input.filters,notes:[],needsTime:false};
         const {filters,needsTime}=interpreted;
         const [inventory,shifts]=await Promise.all([
           filters.modes.includes("goods")&&filters.items.length?needs():[],
           filters.modes.includes("volunteer")&&!needsTime?Promise.all(active.map(campaign=>volunteerShifts(campaign.slug))):[],
         ]);
-        return json({...interpreted,...assistMatches(filters,active,inventory,shifts.flat(),Date.now(),needsTime)});
+        return json({...interpreted,...resolveAssist(filters,active,inventory,shifts.flat(),now,needsTime)});
       }
       case "login": {
         const configured = input.role==="admin" ? process.env.ADMIN_PASSWORD : process.env.ORGANIZER_PASSWORD;

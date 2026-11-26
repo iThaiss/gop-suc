@@ -11,6 +11,11 @@ export type AssistFilters={
   modes:(typeof giveModes[number])[]; location:string; day:typeof days[number]; date:string; part:typeof parts[number]; role:string;
   items:{topic:typeof goodsTopics[number];quantity:number|null;unit:typeof units[number]}[]; money:number|null;
 };
+type GiveMode=AssistFilters["modes"][number];
+type GoodsTopic=AssistFilters["items"][number]["topic"];
+type Relaxation="area"|"schedule"|"role";
+export type AssistAlternative={mode:GiveMode;topic?:GoodsTopic;change:Relaxation};
+type AssistGap={mode:GiveMode;topic?:GoodsTopic;reason:"no-item"|"unit"|"unavailable";alternatives:AssistAlternative[]};
 export const emptyAssistFilters:AssistFilters={modes:[],location:"",day:"any",date:"",part:"any",role:"",items:[],money:null};
 const places=["Đà Nẵng","Quảng Nam","Huế","Hà Nội","Cần Thơ","Hồ Chí Minh","Sài Gòn","Quảng Trị","Quảng Ngãi","Hải Phòng","Cầu Giấy"];
 const volunteerWords=/\b(tinh nguyen|toi ranh|minh ranh|minh co the phu|di phu|phu bep|phat com|dong goi|ho tro truc tiep|gop thoi gian|ca nao|ca nao con|ca tinh nguyen)\b/;
@@ -124,8 +129,11 @@ export function assistMatches(filters:AssistFilters, campaigns:Campaign[], needs
     // A requested unit is a constraint; never turn, for example, 15 notebooks into 15 kits.
     if(!unitMatches) return [];
     const requested=selected.quantity&&selected.unit?selected.quantity:null;
-    return [{id:need.id,name:need.name,unit:need.unit,handoff:need.handoff,available,requested,suggested:requested?Math.min(requested,available):null,campaign:expose(campaign)}];
-  }).sort((a,b)=>Number(b.requested!==null&&b.suggested===b.requested)-Number(a.requested!==null&&a.suggested===a.requested)||b.available-a.available).slice(0,5):[];
+    return [{id:need.id,topic:selected.topic,name:need.name,unit:need.unit,handoff:need.handoff,available,requested,suggested:requested?Math.min(requested,available):null,campaign:expose(campaign)}];
+  }).sort((a,b)=>Number(b.requested!==null&&b.suggested===b.requested)-Number(a.requested!==null&&a.suggested===a.requested)||b.available-a.available):[];
+  // Keep room for at least one result per requested topic before filling the list.
+  const bestByTopic=new Map<GoodsTopic,(typeof goods)[number]>();
+  for(const item of goods) if(!bestByTopic.has(item.topic)) bestByTopic.set(item.topic,item);
   const volunteer=filters.modes.includes("volunteer")&&!needsTime ? shifts.flatMap(shift=>{
     const campaign=active.get(shift.slug), available=shift.capacity-shift.reserved, time=Date.parse(shift.startsAt);
     if(!campaign||available<=0||!Number.isFinite(time)||time<=now||!fitsTime(time,now,filters)||(!here(campaign)&&!contains(shift.location,filters.location))||!contains(shift.title,filters.role)) return [];
@@ -133,6 +141,43 @@ export function assistMatches(filters:AssistFilters, campaigns:Campaign[], needs
   }).sort((a,b)=>Date.parse(a.startsAt)-Date.parse(b.startsAt)).slice(0,4):[];
   const cash=filters.modes.includes("cash") ? [...active.values()].filter(here).sort((a,b)=>a.received/a.goal-b.received/b.goal).slice(0,3)
     .map(campaign=>({campaign:expose(campaign),remaining:Math.max(0,campaign.goal-campaign.received),amount:filters.money})):[];
-  return {goods,volunteer,cash};
+  return {goods:[...bestByTopic.values(),...goods.filter(item=>bestByTopic.get(item.topic)!==item)].slice(0,5),volunteer,cash};
 }
-export type AssistResult=ReturnType<typeof assistMatches> & {filters:AssistFilters;notes:string[];needsTime:boolean};
+
+export function alternativeFilters(filters:AssistFilters, alternative:AssistAlternative):AssistFilters {
+  const next={...filters,modes:[alternative.mode]};
+  if(alternative.topic) next.items=filters.items.filter(item=>item.topic===alternative.topic);
+  if(alternative.change==="area") next.location="";
+  if(alternative.change==="schedule") {next.day="any";next.date="";next.part="any";}
+  if(alternative.change==="role") next.role="";
+  return next;
+}
+
+export function resolveAssist(filters:AssistFilters, campaigns:Campaign[], needs:Need[], shifts:VolunteerShift[], now=Date.now(), needsTime=false) {
+  const match=(candidate:AssistFilters)=>assistMatches(candidate,campaigns,needs,shifts,now,needsTime);
+  const results=match(filters);
+  const gaps:AssistGap[]=[];
+  function gap(mode:GiveMode,opts:{topic?:GoodsTopic;reason?:AssistGap["reason"];changes?:Relaxation[]}={}) {
+    const alternatives=(opts.changes??[]).map(change=>({mode,topic:opts.topic,change}))
+      .filter(candidate=>match(alternativeFilters(filters,candidate))[mode].length>0);
+    gaps.push({mode,topic:opts.topic,reason:opts.reason??"unavailable",alternatives});
+  }
+  const anyArea:Relaxation[]=filters.location.trim()?["area"]:[];
+
+  if(filters.modes.includes("goods")) {
+    if(!filters.items.length) gap("goods",{reason:"no-item"});
+    for(const item of filters.items) {
+      if(results.goods.some(found=>found.topic===item.topic)) continue;
+      // Detect a mismatched unit for the explanation only. Never offer it as a match.
+      const otherUnit=item.unit&&match({...filters,modes:["goods"],items:[{...item,unit:"",quantity:null}]}).goods.length>0;
+      gap("goods",{topic:item.topic,reason:otherUnit?"unit":"unavailable",changes:anyArea});
+    }
+  }
+  if(filters.modes.includes("volunteer")&&!needsTime&&!results.volunteer.length) {
+    const schedule=filters.date||filters.day!=="any"||filters.part!=="any";
+    gap("volunteer",{changes:[...anyArea,...(schedule?["schedule" as const]:[]),...(filters.role.trim()?["role" as const]:[])]});
+  }
+  if(filters.modes.includes("cash")&&!results.cash.length) gap("cash",{changes:anyArea});
+  return {...results,gaps};
+}
+export type AssistResult=ReturnType<typeof resolveAssist> & {filters:AssistFilters;notes:string[];needsTime:boolean};

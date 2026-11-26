@@ -4,7 +4,7 @@ export const topics = [
   { id: "learning", label: "Đồ dùng học tập", examples: ["bút thước vở học sinh", "sách cặp sách balo", "bộ dụng cụ học tập", "tập vở cho trường", "viết chì và tập"] },
   { id: "cleaning", label: "Vật tư vệ sinh", examples: ["xà phòng khăn lau", "bột giặt nước rửa tay", "chổi cây lau nhà", "bộ vệ sinh lớp học", "nước tẩy rửa"] },
   { id: "food", label: "Thực phẩm", examples: ["gạo đóng túi", "mì gói dầu ăn", "gạo tẻ túi", "ký gạo", "kg gạo", "mua thực phẩm", "lương thực nấu cơm"] },
-  { id: "blankets", label: "Chăn ấm", examples: ["chăn mền", "mền sạch", "chăn bông", "chăn ấm mùa đông", "mền đắp"] },
+  { id: "blankets", label: "Chăn ấm", examples: ["chiếc chăn", "chăn sạch", "chăn mền", "mền sạch", "chăn bông", "chăn ấm mùa đông", "mền đắp"] },
   { id: "money", label: "Ủng hộ tiền", examples: ["chuyển khoản", "ủng hộ tiền", "gửi kinh phí", "góp tiền", "gửi đồng vnd", "đóng góp tài chính"] },
 ] as const;
 
