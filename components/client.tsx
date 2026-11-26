@@ -9,13 +9,21 @@ import { receiptAccessFromFragment, receiptPath } from "../lib/receipt-access";
 import { ReceiptImpact } from "./receipt-impact";
 import { PrivateReceiptLink } from "./private-receipt-link";
 import { CalendarLink } from "./calendar-link";
+import { requestAttempt, type Attempt } from "../lib/retry";
 
-export async function api<T>(data: object | FormData, signal?: AbortSignal): Promise<T> {
-  const result = await fetch("/api/gopsuc",{
-    method:"POST", signal,
-    ...(data instanceof FormData ? {body:data} : {headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)}),
-  });
-  const body = await result.json();
+export async function api<T>(data: object | FormData, signal?: AbortSignal, key?:string): Promise<T> {
+  const headers=new Headers();
+  if(!(data instanceof FormData)) headers.set("Content-Type","application/json");
+  if(key) headers.set("Idempotency-Key",key);
+  let result:Response;
+  let body;
+  try {
+    result=await fetch("/api/gopsuc",{method:"POST",signal,headers,body:data instanceof FormData?data:JSON.stringify(data)});
+    body=await result.json();
+  } catch(error) {
+    if(signal?.aborted) throw error;
+    throw new Error(key?"Chưa nhận được phản hồi. Hãy giữ nguyên nội dung và thử gửi lại.":"Chưa kết nối được với Góp Sức. Vui lòng thử lại.");
+  }
   if (!result.ok) throw new Error(body.error ?? "Yêu cầu chưa thành công.");
   return body as T;
 }
@@ -100,6 +108,7 @@ export function Give({campaign, needs, initialNeed, initialAmount, initialCash, 
   const [gift,setGift]=useState<Receipt>();
   const [qr,setQr]=useState<string>();
   const [actionToken,setActionToken]=useState<string|null>(null);
+  const submitAttempt=useRef<Attempt|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [dialogOpen,setDialogOpen]=useState(false);
@@ -158,7 +167,11 @@ export function Give({campaign, needs, initialNeed, initialAmount, initialCash, 
     event.preventDefault();setBusy(true);setError("");
     const form=new FormData(event.currentTarget);
     try {
-      const result=await api<{gift:Receipt;qr:string|null;actionToken:string|null}>({action:"contribute",slug:campaign.slug,kind,amount:Number(amount),needId:kind==="goods"?selected?.id:undefined,anonymous,name:form.get("name")??undefined,note:form.get("note")??undefined});
+      const data={action:"contribute",slug:campaign.slug,kind,amount:Number(amount),needId:kind==="goods"?selected?.id:undefined,anonymous,name:form.get("name")??undefined,note:form.get("note")??undefined};
+      const attempt=requestAttempt(data,submitAttempt.current);
+      submitAttempt.current=attempt;
+      const result=await api<{gift:Receipt;qr:string|null;actionToken:string|null}>(data,undefined,attempt.key);
+      if(submitAttempt.current===attempt) submitAttempt.current=null;
       setGift(result.gift);setQr(result.qr??undefined);setActionToken(result.actionToken);router.refresh();
     } catch (err) {setError(getError(err));} finally {setBusy(false);}
   }

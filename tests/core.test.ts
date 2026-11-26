@@ -4,10 +4,19 @@ import sharp from "sharp";
 import { bookVolunteer, campaign, cancelVolunteer, confirmCash, contribute, manage, needs, publicGifts, publicUpdatePhoto, receipt, updates, volunteerBooking, volunteerShifts } from "../lib/db.ts";
 import { classify, findMatches } from "../lib/match.ts";
 import { receiptAccessFromFragment, receiptPath } from "../lib/receipt-access.ts";
+import { requestAttempt } from "../lib/retry.ts";
 import { encodeUpdateImage } from "../lib/update-image.ts";
 
 process.env.DATABASE_FILE = ":memory:";
 const slug = "lop-hoc-sau-mua";
+
+test("biểu mẫu giữ khóa khi thử lại và đổi khóa khi nội dung thay đổi",()=>{
+  const initial=requestAttempt({slug,amount:10000},null);
+  assert.match(initial.key,/^[a-f0-9]{64}$/);
+  assert.equal(requestAttempt({slug,amount:10000},initial),initial);
+  assert.notEqual(requestAttempt({slug,amount:20000},initial).key,initial.key);
+  assert.notEqual(requestAttempt({slug,amount:10000},null).key,initial.key);
+});
 
 test("liên kết riêng để khóa trong fragment và liên kết chỉ xem không chứa khóa", () => {
   const code="a".repeat(32), token="b".repeat(64);

@@ -60,6 +60,9 @@ function sqlite() {
     CREATE INDEX IF NOT EXISTS volunteer_bookings_shift ON volunteer_bookings(shiftId,status);
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, role TEXT NOT NULL, until INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS request_replays(
+      key_hash TEXT PRIMARY KEY CHECK(length(key_hash)=64), payload_hash TEXT NOT NULL CHECK(length(payload_hash)=64),
+      reference TEXT NOT NULL CHECK(length(reference) BETWEEN 1 AND 32));
     CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY);
   `);
   database.exec("BEGIN IMMEDIATE");
@@ -117,7 +120,7 @@ function postgres(peer: Pick<pg.PoolClient,"query">):Executor {
     let bind=0;
     const statement=sql.replace(/\?/g,()=>"$"+ ++bind)
       .replace(/c\.rowid/g,"c.position").replace(/\b(r\.)?rowid\b/g,"$1sequence")
-      .replace(/\b(FROM|JOIN|INTO|UPDATE) (campaigns|needs|receipts|expenses|expense_photos|updates|update_photos|volunteer_shifts|volunteer_bookings|sessions|limits)\b/gi,"$1 gopsuc.$2");
+      .replace(/\b(FROM|JOIN|INTO|UPDATE) (campaigns|needs|receipts|expenses|expense_photos|updates|update_photos|volunteer_shifts|volunteer_bookings|sessions|limits|request_replays)\b/gi,"$1 gopsuc.$2");
     const {rows}=await peer.query(statement,values.map(v=>v instanceof Uint8Array ? Buffer.from(v) : v));
     return rows.map(row=>{
       const columns: Record<string,string>={needid:"needId",needname:"needName",hasphoto:"hasPhoto",startsat:"startsAt"};
@@ -246,8 +249,29 @@ export async function transaction<T>(action:()=>Promise<T>):Promise<T> {
   });
 }
 
-export function contribute(input: {slug:string;kind:"cash"|"goods";amount:number;needId?:number;name?:string;note?:string}) {
-  return transaction(async ()=>{
+type ReplayScope="contribute"|"bookVolunteer"|"expense";
+const digestHex=(value:string)=>actionDigest(value).toString("hex");
+function privateActionToken(scope:ReplayScope,code:string,key?:string) {
+  return key ? digestHex(`gopsuc:receipt-action:v1\0${scope}\0${code}\0${key}`) : randomBytes(32).toString("hex");
+}
+function writeOnce<T>(scope:ReplayScope,key:string|undefined,payload:unknown[],create:()=>Promise<{value:T;reference:string}>,replay:(reference:string)=>Promise<T>) {
+  return transaction(async()=>{
+    if(!key) return (await create()).value;
+    const keyHash=digestHex(`gopsuc:request-key:v1\0${scope}\0${key}`);
+    const payloadHash=digestHex(JSON.stringify(payload));
+    const previous=await get<{payload_hash:string;reference:string}>("SELECT payload_hash,reference FROM request_replays WHERE key_hash=?",keyHash);
+    if(previous) {
+      if(previous.payload_hash!==payloadHash) throw new RuleError("Yêu cầu gửi lại khác nội dung đã lưu. Hãy mở phiếu cũ hoặc tạo yêu cầu mới.");
+      return replay(previous.reference);
+    }
+    const result=await create();
+    await all("INSERT INTO request_replays(key_hash,payload_hash,reference) VALUES(?,?,?)",keyHash,payloadHash,result.reference);
+    return result.value;
+  });
+}
+
+export function contribute(input: {slug:string;kind:"cash"|"goods";amount:number;needId?:number;name?:string;note?:string},key?:string) {
+  return writeOnce("contribute",key,[input.slug,input.kind,input.amount,input.kind==="goods"?input.needId??null:null,input.name||null,input.note||null],async ()=>{
     if ((await campaign(input.slug))?.status !== "active") throw new RuleError("Chiến dịch đã ngừng nhận đóng góp.");
     let needId: number | null = null;
     if (input.kind === "goods") {
@@ -256,9 +280,13 @@ export function contribute(input: {slug:string;kind:"cash"|"goods";amount:number
       needId = need.id;
     }
     const code = randomBytes(16).toString("hex");
-    const actionToken = input.kind === "cash" ? randomBytes(32).toString("hex") : null;
+    const actionToken = input.kind === "cash" ? privateActionToken("contribute",code,key) : null;
     await all("INSERT INTO receipts(code,slug,kind,amount,needId,name,note,action_hash) VALUES(?,?,?,?,?,?,?,?)",code,input.slug,input.kind,input.amount,needId,input.name || null,input.note || null,actionToken ? actionDigest(actionToken).toString("hex") : null);
-    return {gift:(await receipt(code))!,actionToken};
+    return {reference:code,value:{gift:(await receipt(code))!,actionToken}};
+  },async code=>{
+    const gift=await receipt(code);
+    if(!gift) throw new RuleError("Không còn tìm thấy phiếu đã lưu.");
+    return {gift,actionToken:gift.kind==="cash"?privateActionToken("contribute",code,key):null};
   });
 }
 
@@ -270,16 +298,20 @@ export function confirmCash(code: string, actionToken?: string) {
   });
 }
 
-export function bookVolunteer(slug: string, id: number) {
-  return transaction(async ()=>{
+export function bookVolunteer(slug: string, id: number,key?:string) {
+  return writeOnce("bookVolunteer",key,[slug,id],async ()=>{
     if ((await campaign(slug))?.status!=="active") throw new RuleError("Chiến dịch đã ngừng nhận đăng ký.");
     const shift=(await volunteerShifts(slug)).find(row=>row.id===id);
     if (!shift || Date.parse(shift.startsAt)<=Date.now()) throw new RuleError("Ca này đã qua hoặc không còn mở.");
     if (shift.reserved>=shift.capacity) throw new RuleError("Ca này đã đủ người.");
     const code=randomBytes(16).toString("hex");
-    const actionToken=randomBytes(32).toString("hex");
+    const actionToken=privateActionToken("bookVolunteer",code,key);
     await all("INSERT INTO volunteer_bookings(code,shiftId,status,action_hash) VALUES(?,?,'booked',?)",code,id,actionDigest(actionToken).toString("hex"));
-    return {booking:(await volunteerBooking(code))!,actionToken};
+    return {reference:code,value:{booking:(await volunteerBooking(code))!,actionToken}};
+  },async code=>{
+    const booking=await volunteerBooking(code);
+    if(!booking) throw new RuleError("Không còn tìm thấy phiếu tình nguyện đã lưu.");
+    return {booking,actionToken:privateActionToken("bookVolunteer",code,key)};
   });
 }
 
@@ -292,6 +324,14 @@ export function cancelVolunteer(code: string, actionToken?: string) {
     await all("UPDATE volunteer_bookings SET status='cancelled' WHERE code=?",code);
     return (await volunteerBooking(code))!;
   });
+}
+
+export function recordExpense(role:Role,slug:string,input:{title:string;amount:number;evidence:string},photo?:Uint8Array,key?:string) {
+  if(role!=="admin") throw new RuleError("Cần quyền quản trị để ghi khoản chi đã duyệt.");
+  return writeOnce("expense",key,[slug,input.title,input.amount,input.evidence,photo?createHash("sha256").update(photo).digest("hex"):null],async()=>{
+    await manage(role,slug,"expense",{...input,publishPhoto:photo?1:0},photo);
+    return {reference:"saved",value:undefined};
+  },async()=>undefined);
 }
 
 export function manage(role: Role, slug: string, action: string, input: Record<string, string | number>, photo?: Uint8Array) {

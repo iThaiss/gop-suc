@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { categories, covers } from "../../../lib/domain";
-import { bookVolunteer, campaign, campaignImpact, campaigns, cancelVolunteer, confirmCash, contribute, all, get, manage, needs, receipt, ReceiptAccessError, RuleError, volunteerBooking, volunteerShifts } from "../../../lib/db";
+import { bookVolunteer, campaign, campaignImpact, campaigns, cancelVolunteer, confirmCash, contribute, all, get, manage, needs, receipt, recordExpense, ReceiptAccessError, RuleError, volunteerBooking, volunteerShifts } from "../../../lib/db";
 import { receiptPath } from "../../../lib/receipt-access";
 import { findMatches, topics } from "../../../lib/match";
 import { assistMatches, days, giveModes, goodsTopics, parseAssist, parts, units, validDay } from "../../../lib/assist";
@@ -69,6 +69,10 @@ export async function POST(request: NextRequest) {
   const host = request.headers.get("host") || request.nextUrl.host;
   const expectedOrigin = new URL(process.env.SITE_URL || `${request.nextUrl.protocol}//${host}`).origin;
   if (request.headers.get("origin") !== expectedOrigin) return json({error:"Nguồn yêu cầu không hợp lệ."},403);
+  const suppliedKey=request.headers.get("idempotency-key");
+  const attempt=suppliedKey?.match(/^(?:([a-f0-9]{64})|"([a-f0-9]{64})")$/);
+  if(suppliedKey!==null&&!attempt) return json({error:"Mã gửi lại không hợp lệ."},400);
+  const requestKey=attempt?.[1]??attempt?.[2];
   const token = request.cookies.get(cookie)?.value;
   if (request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data;")) {
     const role = await sessionRole(token);
@@ -82,8 +86,8 @@ export async function POST(request: NextRequest) {
         if (role!=="admin") return json({error:"Chỉ quản trị viên có thể công khai chứng từ chi."},403);
         const parsed=expensePhotoSchema.safeParse(Object.fromEntries(form));
         if (!parsed.success) return json({error:form.get("publishPhoto")!=="yes"?"Xác nhận ảnh đã che thông tin riêng tư trước khi công khai.":"Kiểm tra lại nội dung khoản chi và ảnh chứng từ."},400);
-        const {slug: target,action,title,amount,evidence}=parsed.data;
-        await manage(role,target,action,{title,amount,evidence,publishPhoto:1},await encodeUpdateImage(photos[0]));
+        const {slug: target,title,amount,evidence}=parsed.data;
+        await recordExpense(role,target,{title,amount,evidence},await encodeUpdateImage(photos[0]),requestKey);
       } else {
         const post=updateSchema.safeParse(Object.fromEntries(form));
         if (!post.success) return json({error:"Kiểm tra lại nội dung và ảnh cập nhật."},400);
@@ -117,7 +121,7 @@ export async function POST(request: NextRequest) {
       case "contribute": {
         if (input.kind==="cash" && input.amount < 1000) return json({error:"Số tiền tối thiểu là 1.000 ₫."},400);
         if (!input.anonymous && input.kind==="cash" && !input.name) return json({error:"Nhập tên hiển thị hoặc chọn ẩn danh."},400);
-        const {gift,actionToken} = await contribute({...input,name:input.anonymous || input.kind==="goods" ? undefined : input.name});
+        const {gift,actionToken} = await contribute({...input,name:input.anonymous || input.kind==="goods" ? undefined : input.name},requestKey);
         const qr = actionToken ? await QRCode.toDataURL(new URL(receiptPath(gift.code,actionToken),expectedOrigin).href,{width:320,margin:4}) : null;
         return json({gift,qr,actionToken},201);
       }
@@ -129,7 +133,7 @@ export async function POST(request: NextRequest) {
         if (!booking) return json({error:"Không tìm thấy mã tra cứu."},404);
         return json(input.withImpact ? {booking,impact:await campaignImpact(booking.slug)} : {booking});
       }
-      case "bookVolunteer": return json(await bookVolunteer(input.slug,input.shiftId),201);
+      case "bookVolunteer": return json(await bookVolunteer(input.slug,input.shiftId,requestKey),201);
       case "cancelVolunteer": return json({booking:await cancelVolunteer(input.code,input.actionToken)});
       case "match": return json(findMatches(input.query,await needs()));
       case "assist": {
@@ -159,6 +163,12 @@ export async function POST(request: NextRequest) {
         const result=json({ok:true});
         result.cookies.delete(cookie);
         return result;
+      }
+      case "expense": {
+        const role=await sessionRole(token);
+        if(!role) return json({error:"Phiên đăng nhập đã hết hạn."},401);
+        await recordExpense(role,input.slug,input,undefined,requestKey);
+        return json({ok:true});
       }
       default: {
         const role=await sessionRole(token);

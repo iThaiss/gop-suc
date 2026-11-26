@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rmdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -61,10 +61,11 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   }
   assert.ok(ready, `Không khởi động được bản build để kiểm thử. Chạy npm run build trước.\n${log}`);
 
-  async function post(data, cookie) {
+  const newKey=()=>randomBytes(32).toString("hex");
+  async function post(data, cookie, key) {
     return fetch(origin + "/api/gopsuc", {
       method: "POST",
-      headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { origin, "content-type": "application/json", ...(cookie ? { cookie } : {}), ...(key ? {"Idempotency-Key":key}:{}) },
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(5000),
     });
@@ -117,9 +118,12 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const {goods} = await (await post({action:"match",query:"Mình có 8 bộ dụng cụ học tập"})).json();
   const need = goods.find(item => item.slug === slug);
   assert.ok(need);
-  const booking = await post({action:"contribute",slug,kind:"goods",amount:8,needId:need.id,anonymous:true});
+  const goodsData={action:"contribute",slug,kind:"goods",amount:8,needId:need.id,anonymous:true};
+  const goodsKey=newKey();
+  const booking = await post(goodsData,null,goodsKey);
   assert.equal(booking.status, 201);
   const {gift:pledge} = await booking.json();
+  assert.equal((await (await post(goodsData,null,goodsKey)).json()).gift.code,pledge.code);
   const startsLocal=new Date(Date.now()+19*3_600_000).toISOString().slice(0,16); // 12 hours ahead in Viet Nam.
   assert.equal((await post({action:"addShift",slug,title:"Ca tập trung sớm",location:"Điểm nhận thử",startLocal:startsLocal,capacity:5},organizer)).status,200);
   const operations=await panel("",organizer);
@@ -152,9 +156,17 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.equal(overBudget.status, 409);
   assert.match((await overBudget.json()).error, /vượt quá số dư/);
 
-  const cashResponse = await post({action:"contribute",slug,kind:"cash",amount:20_000,anonymous:true});
-  assert.equal(cashResponse.status, 201);
-  const {gift:cash,actionToken:cashToken,qr} = await cashResponse.json();
+  const cashData={action:"contribute",slug,kind:"cash",amount:20_000,anonymous:true};
+  const cashKey=newKey();
+  assert.equal((await post(cashData,null,"non-random-format")).status,400);
+  const cashRequests=await Promise.all([post(cashData,null,cashKey),post(cashData,null,cashKey)]);
+  assert.deepEqual(cashRequests.map(result=>result.status),[201,201]);
+  const [cashResponse,replay]=await Promise.all(cashRequests.map(result=>result.json()));
+  const {gift:cash,actionToken:cashToken,qr}=cashResponse;
+  assert.equal(replay.gift.code,cash.code);
+  assert.equal(replay.actionToken,cashToken);
+  assert.equal(replay.qr,qr);
+  assert.equal((await post({...cashData,amount:21_000},null,cashKey)).status,409);
   assert.match(qr,/^data:image\/png;base64,/);
   assert.match(cashToken,/^[a-f0-9]{64}$/);
   const cashLookup=(await (await post({action:"lookup",code:cash.code})).json());
@@ -168,19 +180,25 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.equal(repeatConfirm.receipt.status,"confirmed");
 
   const picture=await sharp({create:{width:400,height:600,channels:3,background:"white"}}).withMetadata().jpeg().toBuffer();
-  const submitProof=(cookie,consent,proof=picture,amount="6000")=>{
+  const submitProof=(cookie,consent,proof=picture,amount="6000",key)=>{
     const form=new FormData();
     for(const [key,value] of Object.entries({action:"expense",slug,title:"Chứng từ chi thử",amount,evidence:"Chỉ là chứng từ mô phỏng."})) form.set(key,value);
     if(consent) form.set("publishPhoto","yes");
     form.set("photo",new Blob([proof],{type:"image/jpeg"}),"demo.jpg");
-    return fetch(`${origin}/api/gopsuc`,{method:"POST",headers:{origin,cookie},body:form});
+    return fetch(`${origin}/api/gopsuc`,{method:"POST",headers:{origin,cookie,...(key?{"Idempotency-Key":key}:{})},body:form});
   };
   assert.equal((await submitProof(organizer,true)).status,403);
   assert.equal((await submitProof(admin,false)).status,400);
   assert.equal((await submitProof(admin,true,Buffer.from("not an image"))).status,400);
   assert.equal((await submitProof(admin,true,picture,"30000")).status,409);
   assert.doesNotMatch(await (await fetch(path)).text(),/Chứng từ chi thử/);
-  assert.equal((await submitProof(admin,true)).status,201);
+  const expenseKey=newKey();
+  assert.equal((await submitProof(admin,true,picture,"6000",expenseKey)).status,201);
+  assert.equal((await submitProof(admin,true,picture,"6000",expenseKey)).status,201);
+  assert.equal((await submitProof(admin,true,picture,"7000",expenseKey)).status,409);
+  assert.equal((await submitProof(organizer,true,picture,"6000",expenseKey)).status,403);
+  const spend=await (await post({action:"lookup",code:cash.code,withImpact:true})).json();
+  assert.equal(spend.impact.spent,6000);
   const ledger=await (await fetch(path)).text();
   const imagePath=ledger.match(new RegExp(`/api/gopsuc/expense-photos/${slug}/(\\d+)`));
   assert.ok(imagePath);
@@ -201,9 +219,14 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.ok(!retained.includes(imagePath[0]));
 
   const shiftId = 1; // The first shift belongs to the seeded campaign in a fresh test database.
-  const first = await post({action:"bookVolunteer",slug:"lop-hoc-sau-mua",shiftId});
+  const shiftData={action:"bookVolunteer",slug:"lop-hoc-sau-mua",shiftId};
+  const shiftKey=newKey();
+  const first = await post(shiftData,null,shiftKey);
   assert.equal(first.status,201);
   const {booking:volunteer,actionToken:volunteerToken}=await first.json();
+  const retryShift=await (await post(shiftData,null,shiftKey)).json();
+  assert.equal(retryShift.booking.code,volunteer.code);
+  assert.equal(retryShift.actionToken,volunteerToken);
   assert.equal(volunteer.shiftId,shiftId);
   const calendar=await fetch(`${calendarBase}/${volunteer.slug}/${volunteer.shiftId}`);
   assert.equal(calendar.status,200);
@@ -220,15 +243,12 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.equal(volunteerLookup.booking.status,"booked");
   assert.ok(!("action_hash" in volunteerLookup.booking));
   assert.ok(!JSON.stringify(volunteerLookup).includes(volunteerToken));
-  const cancelled=await post({action:"cancelVolunteer",code:volunteer.code,actionToken:volunteerToken});
-  assert.equal(cancelled.status,200);
-  assert.equal((await cancelled.json()).booking.status,"cancelled");
   const assist=await post({action:"assist",input:{source:"query",query:"Mình có 15 bộ dụng cụ học tập ở Quảng Nam, muốn phụ đóng gói hoặc góp 200k"}});
   assert.equal(assist.status,200);
   const live=await assist.json();
   assert.deepEqual(live.filters.modes,["goods","volunteer","cash"]);
   assert.equal(live.goods[0].suggested,15);
-  assert.equal(live.volunteer[0].available,8);
+  assert.equal(live.volunteer[0].available,7);
   assert.equal(live.cash[0].amount,200_000);
   const refined=await post({action:"assist",input:{source:"filters",filters:{...live.filters,location:"Huế"}}});
   assert.equal(refined.status,200);
@@ -236,11 +256,16 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.deepEqual(edited.goods,[]);
   assert.deepEqual(edited.volunteer,[]);
   assert.ok(edited.cash.length>0&&edited.cash.every(item=>item.campaign.location==="Huế"));
-  const volunteerRace=await Promise.all(Array.from({length:9},()=>post({action:"bookVolunteer",slug:"lop-hoc-sau-mua",shiftId})));
-  assert.deepEqual(volunteerRace.map(item=>item.status).sort(),[201,201,201,201,201,201,201,201,409]);
+  const volunteerRace=await Promise.all(Array.from({length:8},()=>post(shiftData)));
+  assert.deepEqual(volunteerRace.map(item=>item.status).sort(),[201,201,201,201,201,201,201,409]);
   await Promise.all(volunteerRace.map(item=>item.body?.cancel()));
   const noSeats=await (await post({action:"assist",input:{source:"filters",filters:live.filters}})).json();
   assert.deepEqual(noSeats.volunteer,[]);
+  const cancelled=await post({action:"cancelVolunteer",code:volunteer.code,actionToken:volunteerToken});
+  assert.equal(cancelled.status,200);
+  assert.equal((await cancelled.json()).booking.status,"cancelled");
+  const seatReopened=await (await post({action:"assist",input:{source:"filters",filters:live.filters}})).json();
+  assert.equal(seatReopened.volunteer[0].available,1);
 
   assert.equal((await post({ action: "close", slug }, admin)).status, 200);
   const closedCampaign = await fetch(path);
