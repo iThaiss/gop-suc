@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import sharp from "sharp";
+import { demoPasswords, previewEnv } from "../scripts/preview-env.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -26,17 +27,17 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const origin = `http://127.0.0.1:${port}`;
   const directory = await mkdtemp(join(tmpdir(), "gopsuc-api-"));
   const database = join(directory, "test.sqlite");
-  const passwords = { organizer: "local-organizer-test-only", admin: "local-admin-test-only" };
+  const foreignEnv = {
+    ...process.env,
+    DATABASE_URL: "postgresql://invalid:invalid@127.0.0.1:1/never-connect",
+    VERCEL: "1",
+    DATABASE_FILE: join(directory, "not-the-test.sqlite"),
+    SITE_URL: "https://example.invalid",
+    ADMIN_PASSWORD: "external-admin-test-only",
+    ORGANIZER_PASSWORD: "external-organizer-test-only",
+  };
   const child = spawn(process.execPath, [require.resolve("next/dist/bin/next"), "start", "--hostname", "127.0.0.1", "--port", String(port)], {
-    env: {
-      ...process.env,
-      DATABASE_URL: "",
-      VERCEL: "",
-      DATABASE_FILE: database,
-      SITE_URL: origin,
-      ADMIN_PASSWORD: passwords.admin,
-      ORGANIZER_PASSWORD: passwords.organizer,
-    },
+    env: previewEnv(foreignEnv, database, origin),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";
@@ -71,13 +72,14 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
     });
   }
   async function login(role) {
-    const response = await post({ action: "login", role, password: passwords[role] });
+    const response = await post({ action: "login", role, password: demoPasswords[role] });
     assert.equal(response.status, 200);
     const session = response.headers.get("set-cookie");
     assert.match(session ?? "", /HttpOnly/i);
     return session.split(";")[0];
   }
 
+  assert.equal((await post({action:"login", role:"admin", password:foreignEnv.ADMIN_PASSWORD})).status, 401);
   const organizer = await login("organizer");
   const admin = await login("admin");
   const slug = "kiem-thu-luu-quan-tri";

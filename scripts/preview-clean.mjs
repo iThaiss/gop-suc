@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { previewEnv } from "./preview-env.mjs";
 
 const require = createRequire(import.meta.url);
 const data = path.resolve(".data");
@@ -11,11 +12,7 @@ const child = spawn(process.execPath, [
   require.resolve("next/dist/bin/next"), "start", "--hostname", "127.0.0.1", "--port", "3101",
 ], {
   stdio: "inherit",
-  env: {
-    ...process.env,
-    SITE_URL: "http://127.0.0.1:3101",
-    DATABASE_FILE: path.join(directory, "gopsuc.sqlite"),
-  },
+  env: previewEnv(process.env, path.join(directory, "gopsuc.sqlite"), "http://127.0.0.1:3101"),
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

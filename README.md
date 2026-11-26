@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Mở [localhost:3100](http://localhost:3100). Ở **Trang quản trị**, dùng `gopsuc-organizer-demo` cho người tổ chức hoặc `gopsuc-admin-demo` cho quản trị viên. Hai tài khoản mẫu chỉ dùng được ở chế độ phát triển. Để chạy bản production, đặt hai mật khẩu khác nhau dài ít nhất 12 ký tự trong `.env.local` rồi chạy `npm run build` và `npm start`. Xem `.env.example`.
+Mở [localhost:3100](http://localhost:3100). Ở **Trang quản trị**, dùng `gopsuc-organizer-demo` cho người tổ chức hoặc `gopsuc-admin-demo` cho quản trị viên. Hai mật khẩu mẫu dành cho môi trường phát triển và lệnh tập bảo vệ cục bộ. Để chạy production thông thường, đặt hai mật khẩu riêng khác nhau dài ít nhất 12 ký tự trong `.env.local` rồi chạy `npm run build` và `npm start`. Xem `.env.example`.
 
 SQLite tạo dữ liệu mẫu ở `.data/gopsuc.sqlite` trong lần chạy đầu. Để có dữ liệu demo mới mà vẫn giữ lần chạy trước, đặt `DATABASE_FILE` thành đường dẫn đến một tệp SQLite mới. Dùng ổ đĩa bền vững nếu host. Với địa chỉ HTTPS hoặc khi truy cập từ máy khác, đặt `SITE_URL` đúng địa chỉ dùng để mở web. QR chỉ mở phiếu demo. Website không kết nối ngân hàng hay nhận tiền thật.
 
@@ -23,12 +23,12 @@ Trong project Vercel, thêm `DATABASE_URL`, `SITE_URL` (địa chỉ HTTPS chín
 
 ## Cách hệ thống hoạt động
 
-Để tập bảo vệ với dữ liệu mẫu mới, chạy `npm run build` rồi `npm run preview:clean` và mở [127.0.0.1:3101](http://127.0.0.1:3101). Mỗi lần khởi động tạo một tệp SQLite riêng và giữ dữ liệu đang dùng ở cổng 3100. Nếu cần dùng trang quản trị ở bản dựng này, đặt mật khẩu theo hướng dẫn production ở trên.
+Để tập bảo vệ với dữ liệu mẫu mới, chạy `npm run build` rồi `npm run preview:clean` và mở [127.0.0.1:3101](http://127.0.0.1:3101). Lệnh chỉ mở trên máy này, mỗi lần tạo một tệp SQLite riêng và dùng hai mật khẩu demo ở trên, không sử dụng cơ sở dữ liệu online hay dữ liệu đang dùng ở cổng 3100. Xem [kịch bản bảo vệ và tài liệu xin phản biện](docs/ban-giao-va-phan-bien.md).
 
 | Phần | Nơi đọc mã | Quy tắc |
 |---|---|---|
 | Giao diện và chia sẻ | `app/chien-dich`, `components/client.tsx` | Trang chiến dịch và cập nhật có URL riêng, ảnh Open Graph; hộp chia sẻ có nút Facebook, sao chép và menu chia sẻ nếu thiết bị hỗ trợ. |
-| Tiền và hiện vật | `app/api/gopsuc/route.ts`, `lib/db.ts` | Kiểm tra đầu vào ở máy chủ, cập nhật trong giao dịch SQLite, xác nhận tiền lặp chỉ cộng một lần. Lịch hẹn giữ chỗ hiện vật và ghi số thực nhận riêng. |
+| Tiền và hiện vật | `app/api/gopsuc/route.ts`, `lib/db.ts` | Kiểm tra đầu vào và cập nhật trong giao dịch cơ sở dữ liệu ở máy chủ. Xác nhận tiền lặp chỉ cộng một lần. Lịch hẹn giữ chỗ hiện vật và ghi số thực nhận riêng. |
 | Gửi lại khi mất mạng | `lib/retry.ts`, `lib/db.ts` | Biểu mẫu góp tiền, hẹn hiện vật, giữ chỗ và ghi khoản chi dùng khóa ngẫu nhiên cho lần gửi. Nếu bấm gửi lại cùng nội dung trong biểu mẫu đang mở, máy chủ trả kết quả cũ, không tạo bản ghi lần nữa. Khóa không xuất hiện trong phiếu tra cứu; dùng cùng khóa với nội dung khác sẽ bị từ chối. |
 | Quản trị và thu chi | `app/quan-tri`, `lib/session.ts` | Máy chủ kiểm tra vai trò trước thao tác. Chỉ quản trị viên có thể duyệt, đóng và ghi khoản chi. Các khoản chi vượt số dư bị từ chối. |
 | Ảnh chứng từ | `app/api/gopsuc/expense-photos`, `lib/db.ts` | Quản trị viên có thể đính kèm một ảnh chứng từ mô phỏng sau khi xác nhận đã che dữ liệu cá nhân. Ảnh được nén WebP và thêm mã SHA-256 của tệp hiển thị; mã này không chứng minh khoản chi hoặc giấy tờ là thật. Có thể ẩn ảnh mà không đổi số tiền trong sổ thu chi. |
