@@ -5,7 +5,7 @@ import { api } from "./client";
 import { UPDATE_IMAGE_MAX_BYTES } from "../lib/domain";
 import { requestAttempt, type Attempt } from "../lib/retry";
 
-export function ActionForm({ action, slug, children, label, numeric=[], tone="primary" }: {action:string;slug?:string;children?:ReactNode;label:string;numeric?:string[];tone?:"primary"|"secondary"}) {
+export function ActionForm({ action, slug, children, label, numeric=[], tone="primary", onSaved }: {action:string;slug?:string;children?:ReactNode;label:string;numeric?:string[];tone?:"primary"|"secondary";onSaved?:()=>void}) {
   const router=useRouter();
   const [busy,setBusy]=useState(false);
   const [status,setStatus]=useState("");
@@ -37,6 +37,7 @@ export function ActionForm({ action, slug, children, label, numeric=[], tone="pr
       setStatus("Đã lưu.");
       if (action==="create") router.push("/quan-tri?chien="+encodeURIComponent(String(fields.slug)));
       else router.refresh();
+      onSaved?.();
     }catch(e){setFailed(true);setStatus(e instanceof Error?e.message:"Thử lại sau.");}finally{setBusy(false);}
   }
   return <form className="form admin-form" onSubmit={send}>{children}<button className={tone==="secondary"?"button outline":"button"} disabled={busy}>{busy?"Đang lưu…":label}</button>{status&&<small role={failed?"alert":"status"} className={failed?"error":""}>{status}</small>}</form>;

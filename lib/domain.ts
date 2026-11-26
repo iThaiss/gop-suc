@@ -21,6 +21,7 @@ export type Receipt = {
   status: "pending" | "confirmed" | "cancelled"; actual: number | null;
   needId: number | null; needName: string | null; unit: string | null; handoff: string | null;
 };
+export type HandoffReceipt = Pick<Receipt,"code"|"slug"|"amount"|"status"|"actual"|"needName"|"unit"|"handoff">;
 export type VolunteerShift = {id:number;slug:string;title:string;location:string;startsAt:string;capacity:number;reserved:number};
 export type VolunteerBooking = {code:string;slug:string;shiftId:number;title:string;location:string;startsAt:string;status:"booked"|"cancelled"};
 export const shiftCalendarPath = (slug:string,shiftId:number) => `/api/gopsuc/volunteer-calendar/${slug}/${shiftId}`;

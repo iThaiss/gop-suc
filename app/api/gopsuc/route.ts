@@ -2,7 +2,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { z } from "zod";
-import { categories, covers } from "../../../lib/domain";
+import { categories, covers, type HandoffReceipt } from "../../../lib/domain";
+import { canManageCampaign } from "../../../lib/coordination";
 import { bookVolunteer, campaign, campaignImpact, campaigns, cancelVolunteer, confirmCash, contribute, all, get, manage, needs, receipt, recordExpense, ReceiptAccessError, RuleError, volunteerBooking, volunteerShifts } from "../../../lib/db";
 import { receiptPath } from "../../../lib/receipt-access";
 import { findMatches, topics } from "../../../lib/match";
@@ -48,6 +49,7 @@ const schema = z.discriminatedUnion("action",[
   updateSchema,
   expenseSchema,
   z.object({action:z.literal("hideExpensePhoto"),slug,expenseId:z.number().int().positive().max(2_147_483_647)}),
+  z.object({action:z.literal("handoffLookup"),slug,code}),
   z.object({action:z.literal("receive"),...manageCommon,code,actual:z.number().int().min(1).max(100_000)}),
   z.object({action:z.literal("cancel"),...manageCommon,code}),
 ]);
@@ -132,6 +134,18 @@ export async function POST(request: NextRequest) {
         const booking=await volunteerBooking(input.code);
         if (!booking) return json({error:"Không tìm thấy mã tra cứu."},404);
         return json(input.withImpact ? {booking,impact:await campaignImpact(booking.slug)} : {booking});
+      }
+      case "handoffLookup": {
+        const role=await sessionRole(token);
+        if(!role) return json({error:"Phiên đăng nhập đã hết hạn."},401);
+        const missing=()=>json({error:"Không tìm thấy phiếu hiện vật trong chiến dịch đang chọn."},404);
+        const selected=await campaign(input.slug);
+        if(!selected||!canManageCampaign(role,selected)) return missing();
+        const gift=await receipt(input.code);
+        if(!gift||gift.kind!=="goods"||gift.slug!==selected.slug) return missing();
+        const {code:receiptCode,slug:campaignSlug,amount,status,actual,needName,unit,handoff}=gift;
+        const result:HandoffReceipt={code:receiptCode,slug:campaignSlug,amount,status,actual,needName,unit,handoff};
+        return json({handoff:result});
       }
       case "bookVolunteer": return json(await bookVolunteer(input.slug,input.shiftId,requestKey),201);
       case "cancelVolunteer": return json({booking:await cancelVolunteer(input.code,input.actionToken)});

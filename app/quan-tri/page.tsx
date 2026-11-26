@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { ClipboardCheck, HandHeart, Package, Plus, Wallet } from "lucide-react";
 import { ActionForm } from "../../components/admin";
 import { CoordinationBoard } from "../../components/coordination-board";
+import { HandoffActions, HandoffFinder } from "../../components/handoff-finder";
 import { JournalDraftFields } from "../../components/journal-draft";
 import { Share } from "../../components/client";
 import { campaigns, expenses, GOODS_PAGE_SIZE, needs, pendingCounts, pendingGoods, updates, volunteerShifts } from "../../lib/db";
@@ -110,10 +111,11 @@ export default async function Admin({searchParams}: {searchParams:Promise<{chien
           </details>}
         </>}
         {tab==="handoff" && <>
-          <h3 id="ban-giao">Hiện vật chờ bàn giao</h3>{queue.map(g=><details className="admin-disclosure" key={g.code}>
+          <h3 id="ban-giao">Bàn giao hiện vật</h3>
+          <HandoffFinder slug={selected.slug}/>
+          <h4>Hiện vật chờ bàn giao</h4>{queue.map(g=><details className="admin-disclosure" key={g.code}>
             <summary>{g.needName} · hẹn {g.amount} {g.unit}</summary><p>{g.handoff}</p><small>Mã <code>{g.code}</code></small>
-            <ActionForm action="receive" slug={g.slug} label="Xác nhận đã nhận" numeric={["actual"]}><input type="hidden" name="code" value={g.code}/><label>Số thực nhận<input name="actual" type="number" min="1" max={g.amount} defaultValue={g.amount} required/></label></ActionForm>
-            <ActionForm action="cancel" slug={g.slug} label="Hủy hẹn" tone="secondary"><input type="hidden" name="code" value={g.code}/></ActionForm>
+            <HandoffActions gift={{...g}}/>
           </details>)}{!queue.length&&<p>Chưa có lịch hẹn bàn giao.</p>}
           {pages>1&&<nav className="filters admin-pages" aria-label="Các trang phiếu bàn giao">
             {page>1&&<Link href={adminPath(selected.slug,tab,page-1)}>Trang trước</Link>} <span>Trang {page}/{pages}</span> {page<pages&&<Link href={adminPath(selected.slug,tab,page+1)}>Trang sau</Link>}

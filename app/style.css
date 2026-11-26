@@ -340,6 +340,12 @@ footer{border-top:1px solid var(--line)}
 .admin-disclosure{margin-top:12px;padding:12px!important;border:1px solid var(--line)!important;border-radius:10px}
 .admin-disclosure summary{font-weight:750;color:var(--forest)}
 .admin-disclosure summary svg{display:inline-block;vertical-align:middle;margin-right:3px}
+.handoff-finder{display:grid;gap:10px;margin:10px 0 20px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--cream)}
+.handoff-finder small,.handoff-cancel p{color:var(--muted);font-size:.88rem}
+.handoff-result{display:grid;gap:6px;padding:11px;border-radius:9px;background:var(--white);border:1px solid var(--line);overflow-wrap:anywhere}
+.handoff-result header{display:flex;gap:6px 12px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+.handoff-cancel{margin-top:12px}
+.handoff-cancel summary{cursor:pointer;color:var(--forest);font-weight:700;padding:6px 0}
 .admin-campaign-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
 .admin-campaign-head h2{font-size:clamp(1.6rem,3vw,2.35rem);margin-top:7px;overflow-wrap:anywhere}
 .admin-state{display:inline-block;padding:3px 8px;border-radius:8px;background:var(--sage);color:var(--forest);font-size:.875rem;font-weight:800}

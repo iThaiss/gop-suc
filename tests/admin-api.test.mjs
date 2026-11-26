@@ -93,7 +93,11 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const privateStart=new Date(Date.now()+31*3_600_000).toISOString().slice(0,16);
   assert.equal((await post({action:"addShift",slug:adminOnly.slug,title:"Ca chưa công bố",location:"Điểm nội bộ",startLocal:privateStart,capacity:5},admin)).status,200);
   assert.equal((await fetch(`${calendarBase}/${adminOnly.slug}/2`)).status,404);
-  const panel=async (url,cookie)=>await (await fetch(`${origin}/quan-tri${url}`,{headers:cookie?{cookie}:{}})).text();
+  const panel=async (url,cookie)=>{
+    const response=await fetch(`${origin}/quan-tri${url}`,{headers:cookie?{cookie}:{}});
+    assert.equal(response.status,200,`Trang quản trị không mở được: ${url}\n${log}`);
+    return await response.text();
+  };
   assert.doesNotMatch(await panel("",null),/id="ban-dieu-phoi"/);
   const orgBoard=await panel("",organizer);
   assert.match(orgBoard,/id="ban-dieu-phoi"/);
@@ -135,7 +139,28 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   const basicLookup = await (await post({action:"lookup",code:pledge.code})).json();
   assert.equal(basicLookup.gift.status, "pending");
   assert.ok(!("impact" in basicLookup));
+  const handoffQuery={action:"handoffLookup",slug,code:pledge.code};
+  assert.equal((await post(handoffQuery)).status,401);
+  assert.equal((await post({...handoffQuery,code:pledge.code.slice(0,8)},organizer)).status,400);
+  assert.equal((await post({...handoffQuery,slug:"lop-hoc-sau-mua"},organizer)).status,404);
+  assert.match(await panel(`?chien=${slug}&muc=handoff`,organizer),/Mã tra cứu phiếu hiện vật/);
+  const handoffResponse=await post(handoffQuery,organizer);
+  assert.equal(handoffResponse.status,200);
+  assert.equal(handoffResponse.headers.get("cache-control"),"no-store");
+  const {handoff}=await handoffResponse.json();
+  assert.deepEqual(handoff,{code:pledge.code,slug,amount:8,status:"pending",actual:null,needName:"Dụng cụ kiểm thử",unit:"bộ",handoff:"Điểm nhận thử"});
+  assert.equal((await post({action:"publish",slug:adminOnly.slug},admin)).status,200);
+  assert.equal((await post({action:"need",slug:adminOnly.slug,name:"Chăn trong ca kiểm thử",unit:"chiếc",target:10,handoff:"Điểm nhận thử",topic:"blankets"},admin)).status,200);
+  const adminGoods=(await (await post({action:"match",query:"Mình có 2 chiếc chăn bông"})).json()).goods.find(item=>item.slug===adminOnly.slug);
+  assert.ok(adminGoods);
+  const adminGift=(await (await post({action:"contribute",slug:adminOnly.slug,kind:"goods",amount:2,needId:adminGoods.id,anonymous:true})).json()).gift;
+  const adminLookup={action:"handoffLookup",slug:adminOnly.slug,code:adminGift.code};
+  assert.equal((await post(adminLookup,organizer)).status,404);
+  assert.equal((await post(adminLookup,admin)).status,200);
+  assert.equal((await post({action:"close",slug:adminOnly.slug},admin)).status,200);
   assert.equal((await post({action:"receive",slug,code:pledge.code,actual:6}, organizer)).status, 200);
+  assert.equal((await post({action:"receive",slug,code:pledge.code,actual:6}, organizer)).status, 409);
+  assert.deepEqual((await (await post(handoffQuery,organizer)).json()).handoff,{...handoff,actual:6,status:"confirmed"});
   const lookup = await post({action:"lookup",code:pledge.code,withImpact:true});
   assert.equal(lookup.status, 200);
   assert.equal(lookup.headers.get("cache-control"), "no-store");
@@ -152,7 +177,15 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.equal(available.find(item => item.slug === slug)?.available, 4);
   const goodsRace = await Promise.all(Array.from({length:5},()=>post({action:"contribute",slug,kind:"goods",amount:1,needId:need.id,anonymous:true})));
   assert.deepEqual(goodsRace.map(item=>item.status).sort(),[201,201,201,201,409]);
-  await Promise.all(goodsRace.map(item=>item.body?.cancel()));
+  const [firstQueued,...otherQueued]=goodsRace.sort((a,b)=>a.status-b.status);
+  const queued=(await firstQueued.json()).gift;
+  await Promise.all(otherQueued.map(item=>item.body?.cancel()));
+  assert.equal((await post({action:"cancel",slug,code:queued.code},organizer)).status,200);
+  const cancelledHandoff=(await (await post({...handoffQuery,code:queued.code},organizer)).json()).handoff;
+  assert.equal(cancelledHandoff.status,"cancelled");
+  assert.equal(cancelledHandoff.actual,null);
+  // The freed unit can be reserved again; the later assistant test expects this need to be full.
+  assert.equal((await post({...goodsData,amount:1})).status,201);
 
   const overBudget = await post({ action: "expense", slug, title: "Vượt ngân sách", amount: 1, evidence: "Chứng từ mô phỏng" }, admin);
   assert.equal(overBudget.status, 409);
@@ -165,6 +198,7 @@ test("lưu quản trị, tra cứu và quyền thao tác riêng qua HTTP", { tim
   assert.deepEqual(cashRequests.map(result=>result.status),[201,201]);
   const [cashResponse,replay]=await Promise.all(cashRequests.map(result=>result.json()));
   const {gift:cash,actionToken:cashToken,qr}=cashResponse;
+  assert.equal((await post({...handoffQuery,code:cash.code},organizer)).status,404);
   assert.equal(replay.gift.code,cash.code);
   assert.equal(replay.actionToken,cashToken);
   assert.equal(replay.qr,qr);
