@@ -6,6 +6,7 @@ import { CalendarDays, MapPin, X } from "lucide-react";
 import { api } from "./client";
 import { PrivateReceiptLink } from "./private-receipt-link";
 import { CalendarLink } from "./calendar-link";
+import { ReceiptCodeActions } from "./saved-receipts";
 import { requestAttempt, type Attempt } from "../lib/retry";
 import { vietnamTime, type VolunteerBooking, type VolunteerShift } from "../lib/domain";
 
@@ -71,7 +72,7 @@ export function VolunteerShifts({items,open,initialShift}: {items:VolunteerShift
         <button type="button" aria-label="Đóng" className="icon" onClick={()=>dialog.current?.close()}><X/></button>
       </div>
       {selected && <div className="ticket"><strong>{selected.title}</strong><span>{vietnamTime(selected.startsAt)}</span><span>{selected.location}</span></div>}
-      {booking ? <>{booking.status==="booked"&&<><CalendarLink slug={booking.slug} shiftId={booking.shiftId}/><p>Bạn có thể hủy trước giờ bắt đầu bằng liên kết riêng bên dưới.</p></>}<label>Mã tra cứu (chỉ xem)<input readOnly value={booking.code} onFocus={event=>event.currentTarget.select()}/></label>
+      {booking ? <>{booking.status==="booked"&&<><CalendarLink slug={booking.slug} shiftId={booking.shiftId}/><p>Bạn có thể hủy trước giờ bắt đầu bằng liên kết riêng bên dưới.</p></>}<ReceiptCodeActions key={booking.code} code={booking.code} kind="volunteer"/>
         <PrivateReceiptLink code={booking.code} actionToken={actionToken} label="Mở phiếu tình nguyện"/></> : <button className="button" type="button" disabled={busy} onClick={()=>void book()}>{busy?"Đang giữ chỗ…":"Xác nhận giữ 1 chỗ"}</button>}
       {error && <p className="error" role="alert">{error}</p>}
     </dialog>

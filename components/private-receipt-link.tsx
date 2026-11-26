@@ -14,7 +14,7 @@ export function PrivateReceiptLink({code,actionToken,label}: {code:string;action
         const link=new URL(path,window.location.origin).href;
         try {await navigator.clipboard.writeText(link);setStatus("Đã sao chép liên kết thao tác riêng.");setManual("");}
         catch {setManual(link);setStatus("Hãy chọn và sao chép liên kết bên dưới.");}
-      }}><Copy size={16} aria-hidden="true"/> Lưu liên kết riêng</button>
+      }}><Copy size={16} aria-hidden="true"/> Sao chép liên kết riêng</button>
     </div>
     <small><LockKeyhole size={14} aria-hidden="true"/> Giữ liên kết này cho riêng bạn. Chỉ gửi mã tra cứu nếu người khác cần xem.</small>
     {manual&&<label>Liên kết riêng<input readOnly value={manual} onFocus={event=>event.currentTarget.select()}/></label>}

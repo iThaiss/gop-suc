@@ -294,7 +294,17 @@ footer{border-top:1px solid var(--line)}
 .cancel-booking summary{cursor:pointer;font-weight:750;color:var(--forest)}
 .cancel-booking p{margin:8px 0}
 .need>div.need-details{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
-.receipt-copy{display:inline-flex;align-items:center;gap:6px;justify-self:start;min-height:36px;padding:6px 9px;border:1px solid #8ba48d;border-radius:8px;background:var(--white);color:var(--forest);font-weight:700}
+.receipt-copy{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:6px 9px;border:1px solid #8ba48d;border-radius:8px;background:var(--white);color:var(--forest);font-weight:700;text-decoration:none}
+.receipt-code-actions{display:grid;gap:7px;min-width:0}
+.receipt-code-actions small,.saved-receipts p,.saved-receipts small{color:var(--muted);font-size:.87rem}
+.receipt-save-status:empty{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.saved-receipts{margin-top:24px}
+.saved-receipts h2{display:flex;gap:8px;align-items:center;font-size:1.24rem}
+.saved-receipts h2 small{border-radius:100px;padding:3px 8px;background:var(--sage)}
+.saved-receipts ul{margin:12px 0;padding:0;list-style:none;display:grid}
+.saved-receipts li{border-top:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:9px 0}
+.saved-receipts li>span{display:grid}
+.saved-receipt-current{font-size:.88rem;font-weight:700;color:var(--muted);padding:7px}
 .ai-result-action{margin-top:4px;font-weight:750;text-decoration:underline}
 .ai-result .match-complete,.ai-result .match-partial{justify-self:start;margin:4px 0;padding:3px 8px;border-radius:7px;font-weight:750;font-size:.875rem}
 .match-complete{color:#174b37;background:#e4eddf}

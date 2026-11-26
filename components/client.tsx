@@ -9,6 +9,7 @@ import { receiptAccessFromFragment, receiptPath } from "../lib/receipt-access";
 import { ReceiptImpact } from "./receipt-impact";
 import { PrivateReceiptLink } from "./private-receipt-link";
 import { CalendarLink } from "./calendar-link";
+import { ReceiptCodeActions, SavedReceipts } from "./saved-receipts";
 import { requestAttempt, type Attempt } from "../lib/retry";
 
 export async function api<T>(data: object | FormData, signal?: AbortSignal, key?:string): Promise<T> {
@@ -58,18 +59,12 @@ export function Share({ path, title }: {path:string;title:string}) {
 }
 
 function ReceiptView({ gift }: {gift:Receipt}) {
-  const [copyMessage,setCopyMessage]=useState("");
   return <div className="ticket"><strong>{gift.kind==="cash" ? money(gift.amount) : `${gift.amount} ${gift.unit} · ${gift.needName}`}</strong>
     <span>{gift.status==="confirmed" ? gift.kind==="goods" ? `Đã nhận ${gift.actual} ${gift.unit}` : "Đã ghi nhận khoản ủng hộ" : gift.status==="cancelled" ? "Đã hủy hẹn" : gift.kind==="cash" ? "Đang chờ xác nhận" : "Đã đăng ký · chờ bàn giao"}</span>
     {gift.kind==="goods" && gift.status==="confirmed" && gift.actual!==null && gift.actual<gift.amount &&
       <small>Đã hẹn {gift.amount} {gift.unit} · Chênh lệch {gift.amount-gift.actual} {gift.unit} không được tính là đã nhận.</small>}
     {gift.status==="pending" && gift.handoff && <span>{gift.handoff}</span>}
-    <label>Mã tra cứu<input value={gift.code} readOnly onFocus={event=>event.currentTarget.select()}/></label>
-    <button type="button" className="receipt-copy" onClick={async()=>{
-      try { await navigator.clipboard.writeText(gift.code);setCopyMessage("Đã sao chép mã tra cứu."); }
-      catch { setCopyMessage("Chọn và sao chép mã trong ô bên trên."); }
-    }}><Copy size={15}/> Sao chép mã</button>
-    {copyMessage && <small role="status">{copyMessage}</small>}
+    <ReceiptCodeActions key={gift.code} code={gift.code} kind={gift.kind}/>
   </div>;
 }
 
@@ -265,7 +260,7 @@ export function Lookup({initialCode}: {initialCode:string}) {
   }
   return <><form className="form" onSubmit={event=>{event.preventDefault();void process();}}><label>Mã tra cứu<input value={code} onChange={e=>setCode(e.target.value)} required autoComplete="off" spellCheck={false}/></label><button disabled={busy} className="button">{busy?"Đang xử lý…":"Tra cứu"}</button></form>
     {gift && <><ReceiptView gift={gift}/>{gift.kind==="cash" && gift.status==="pending" && (access?.code===gift.code ? <button className="button" disabled={busy} onClick={()=>void process(true)}>Xác nhận giao dịch demo</button> : <p>Phiếu chỉ xem. Hãy quét QR riêng hoặc mở liên kết thao tác đã lưu để xác nhận.</p>)}</>}
-    {booking && <><div className="ticket"><strong>{booking.title}</strong><span>{vietnamTime(booking.startsAt)} · {booking.location}</span><span>{booking.status==="booked"?"Đã giữ 1 chỗ":"Đã hủy giữ chỗ"}</span></div>
+    {booking && <><div className="ticket"><strong>{booking.title}</strong><span>{vietnamTime(booking.startsAt)} · {booking.location}</span><span>{booking.status==="booked"?"Đã giữ 1 chỗ":"Đã hủy giữ chỗ"}</span><ReceiptCodeActions key={booking.code} code={booking.code} kind="volunteer"/></div>
       {booking.status==="booked"&&Date.parse(booking.startsAt)>Date.now()&&<CalendarLink slug={booking.slug} shiftId={booking.shiftId}/>}
       <a href={`/chien-dich/${booking.slug}#tinh-nguyen`}>Xem ca trên trang chiến dịch</a>
       {booking.status==="booked" && Date.parse(booking.startsAt)>Date.now() && (access?.code===booking.code ? <details className="cancel-booking"><summary>Hủy giữ chỗ</summary><p>Chỗ này sẽ được mở lại cho người khác.</p><button type="button" className="button outline" disabled={busy} onClick={async()=>{
@@ -278,6 +273,7 @@ export function Lookup({initialCode}: {initialCode:string}) {
     </>}
     {error && <p className="error" role="alert">{error}</p>}{status&&<p role="status">{status}</p>}
     {impact ? <ReceiptImpact impact={impact}/> : gift && <a href={`/chien-dich/${gift.slug}#nhat-ky`}>Xem nhật ký chiến dịch</a>}
+    <SavedReceipts currentCode={gift?.code??booking?.code}/>
   </>;
 }
 
